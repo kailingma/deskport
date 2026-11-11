@@ -52,22 +52,38 @@ The sliders button in the top bar (or More, then Settings, on a phone) opens the
 | Setting | Options |
 | --- | --- |
 | Theme | System, Light, Dark |
-| Picture quality | Faster (about 10 frames per second), Balanced, Sharper (lossless). Applies when you close settings; the screen reconnects. |
+| Resolution | Auto (fits this screen, with room to pinch-zoom 2x on touch screens), Full size, 75%, 50%, 33% |
+| Picture quality | Low, Medium, High, Lossless |
+| Prioritize | Responsiveness (every frame) or Data use (about 10 frames per second) |
 | Touch scrolling | Natural or reversed direction |
 | Terminal colours | deskport dark and light, Solarized dark and light, Nord, Gruvbox dark |
 | Terminal font and size | System monospace, JetBrains Mono, IBM Plex Mono; 9 to 22 px |
 | Cursor | Block, bar or underline; blinking on or off |
 | Extra key row | Auto (on phones in the terminal and when a keyboard is up), always, never |
 
+Resolution, picture quality and priority apply when you close settings; the screen reconnects.
+
 ### Speed
 
-GNOME desktop sharing in mirror mode always sends the monitor at its native resolution; it ignores the size the browser asks for. On a 4K monitor that is the main cost. What deskport does about it:
+GNOME desktop sharing in mirror mode always sends the monitor at its native resolution and ignores the size the browser asks for. deskport never changes the monitor; instead the server reshapes the picture before it leaves the machine:
 
-- Screen messages are compressed (permessage-deflate), which cut traffic by about a quarter in testing.
-- The quality presets trade frame rate and lossless output for data. Measured on a mostly static 4K desktop: Faster about 310 KB/s at 10 fps, Balanced about 380 KB/s at 16 fps, Sharper 530 to 650 KB/s.
-- Audio is not requested (GNOME's RDP audio channel does not work with guacd).
+- **Resolution**: below Full size, the server shrinks every image guacd produces and scales every drawing coordinate, then scales your mouse back up. Auto picks the smallest size that still fills your screen's pixels.
+- **Quality**: Low and Medium re-encode images as JPEG at quality 35 and 60. High keeps guacd's own images. Lossless makes guacd send exact pixels.
+- **Prioritize**: Responsiveness sends every frame as soon as it is ready. Data use holds frame acknowledgements back so guacd sends about 10 frames per second.
+- Screen messages are compressed (permessage-deflate), and audio is not requested.
 
-Lowering the monitor's own resolution during a session would cut traffic much further, but changing monitor modes broke the display on a machine with one monitor connected to two GPUs, so deskport does not do it. `node scripts/measure-screen.mjs [seconds] [ws://host:port]` measures the presets against a dev server.
+Measured on this 4K desktop while it was busy (read-only sessions, 10 seconds each):
+
+| Setting | Picture | Traffic |
+| --- | --- | --- |
+| Full size, High | 3840 × 2160 | 1,450 KB/s |
+| Full size, Lossless | 3840 × 2160 | 1,960 KB/s |
+| Full size, Low | 3840 × 2160 | 410 KB/s |
+| 50%, High | 1920 × 1080 | 330 KB/s |
+| 50%, Low | 1920 × 1080 | 220 KB/s |
+| 50%, Low, Data use | 1920 × 1080 | 180 KB/s |
+
+Re-encoding did not lower the frame rate in these runs. `node scripts/measure-screen.mjs [seconds] [ws://host:port] [query ...]` repeats the measurement against a dev server.
 
 ### Connection states
 

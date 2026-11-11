@@ -14,8 +14,9 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | --- | --- |
 | `src/config.js` | Loads `deskport.env` and `rdp.env` from `~/.config/deskport` (or `DESKPORT_CONFIG_DIR`), builds the config object, and validates it. Variables already in the environment win over the files. |
 | `src/auth.js` | Verifies the Cloudflare Access JWT, and checks WebSocket `Origin`. |
-| `src/server.js` | Express app, security headers, `/api/me`, `/vendor/*` routes, static files, and the WebSocket upgrade router. |
+| `src/server.js` | Express app, security headers, `/api/me`, `/vendor/*` routes, the page and its assets under `/v/<content hash>/` (so browsers never mix old and new files), and the WebSocket upgrade router. |
 | `src/guac.js` | Guacamole protocol encoder and parser, and the bridge between a browser WebSocket and a guacd TCP connection. |
+| `src/scaler.js` | Shrinks and re-encodes the screen stream for the Resolution and Quality settings. |
 | `src/terminal.js` | Attaches a WebSocket to tmux through a pseudo-terminal. |
 | `public/app.js` | Entry point: views, full screen and the floating toolbar, settings dialog, key row, viewport handling. |
 | `public/js/screen.js` | Screen view: Guacamole client, scaling and zoom, touch gestures, soft keyboard. |
@@ -24,7 +25,7 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | `public/` (rest) | `index.html`, `style.css`, `theme-init.js` (applies a saved light/dark choice before first paint), icons, manifest. No build step. |
 | `scripts/` | `setup-rdp.sh`, `install-services.sh`, `make-icons.mjs`, `measure-screen.mjs`. |
 | `deploy/` | guacd compose file and the cloudflared config example. |
-| `test/` | `node --test` tests for the protocol parser. |
+| `test/` | `node --test` tests for the protocol parser and the scaler. |
 
 ## Authentication
 
@@ -55,10 +56,16 @@ The browser runs `guacamole-common-js`. Its `WebSocketTunnel` connects to `/ws/s
 
 From then on it forwards complete instructions both ways. Guacamole element lengths count Unicode code points, so `GuacParser` handles surrogate pairs and instructions split across TCP chunks; `WebSocketTunnel` requires whole instructions per frame. Internal `ping` instructions from the browser are answered directly, other internal instructions are dropped.
 
-The browser passes a quality preset (`fast`, `balanced`, `best`) in the query string. GNOME ignores colour depth and most RDP experience flags, so the presets differ in two ways:
+The browser passes three picture settings in the query string: `res` (`auto`, `1`, `0.75`, `0.5`, `0.33`), `quality` (`low`, `medium`, `high`, `lossless`) and `priority` (`speed`, `data`).
 
-- `best` sets `force-lossless`, so guacd never sends JPEG or lossy WebP.
-- `fast` caps the frame rate at about 10 fps. guacd sends the next frame only after the browser acknowledges the previous one with a `sync` instruction, so the bridge holds those acknowledgements back until 100 ms have passed since the last one it forwarded.
+- `quality=lossless` sets guacd's `force-lossless`.
+- `priority=data` caps the frame rate at about 10 fps. guacd sends the next frame only after the browser acknowledges the previous one with a `sync` instruction, so the bridge holds those acknowledgements back until 100 ms have passed since the last one it forwarded.
+- When `res` is below 1, or quality is `low` or `medium`, the bridge passes guacd's output through `src/scaler.js`:
+  - Every coordinate in drawing instructions (`size`, `rect`, `copy`, `transfer`, `cursor`, `mouse`, `move`, path instructions) is multiplied by the scale. Spans are mapped edge by edge, so adjacent rectangles stay adjacent after rounding.
+  - Each image stream (`img`, `blob`, `end`) is collected, resized with sharp (libvips), re-encoded (JPEG; WebP when the image has alpha; PNG for lossless), and emitted where the original `end` was. Output stays in order because a queue waits on each image before sending what follows it.
+  - Mouse instructions from the browser are divided by the scale on the way back.
+  - For `auto`, the scale is chosen when guacd reports the desktop size: the largest picture that fits the browser's device pixels (twice that on touch screens, for pinch-zoom headroom). Output is held until then.
+  - Moved regions (`copy`) are rounded to whole pixels at the smaller size, so a scrolled area can sit up to half a pixel off until it is redrawn.
 
 Audio is not requested. The screen WebSocket uses permessage-deflate at zlib level 1: the images travel as base64, and compression wins back most of that overhead. The credentials never reach the browser.
 

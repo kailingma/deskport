@@ -1,6 +1,7 @@
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
+import { createScaler } from './scaler.js';
 
 // Guacamole protocol: each element is "<length>.<value>", elements are
 // separated by "," and an instruction ends with ";". Lengths count Unicode
@@ -83,15 +84,19 @@ function intParam(value, fallback, min, max) {
  * Bridges a guacamole-common-js WebSocketTunnel to guacd and opens an RDP
  * session to this machine's GNOME desktop sharing.
  */
-// Quality presets, from the settings menu. GNOME desktop sharing ignores colour
-// depth and most RDP experience flags, so the presets differ in frame rate and
-// in whether guacd may compress lossily. Measured on a mostly static 4K desktop:
-// fast ~310 KB/s at ~10 fps, balanced ~380 KB/s at ~16 fps, best 530-650 KB/s.
-const PRESETS = {
-  fast: { minFrameMs: 100, params: {} },
-  balanced: { minFrameMs: 0, params: {} },
-  best: { minFrameMs: 0, params: { 'force-lossless': 'true' } },
-};
+// Picture settings from the settings menu. GNOME desktop sharing ignores colour
+// depth, most RDP experience flags and the requested size, so deskport shapes
+// the picture itself:
+//   quality   low | medium | high | lossless. Low and medium re-encode guacd's
+//             images as JPEG at quality 35 / 60 (see scaler.js); lossless makes
+//             guacd send only lossless images.
+//   priority  speed sends every frame; data paces frame acknowledgements so
+//             guacd sends about 10 frames per second.
+//   res       auto | 1 | 0.75 | 0.5 | 0.33. Below 1, scaler.js shrinks the picture;
+//             auto picks the scale that fills the browser's device pixels.
+const QUALITIES = new Set(['low', 'medium', 'high', 'lossless']);
+const SCALES = new Set(['1', '0.75', '0.5', '0.33']);
+const DATA_SAVER_FRAME_MS = 100;
 
 const BASE_PARAMS = {
   'color-depth': '24',
@@ -111,8 +116,13 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
     ? url.searchParams.get('tz')
     : '';
 
-  const quality = Object.hasOwn(PRESETS, url.searchParams.get('quality')) ? url.searchParams.get('quality') : 'balanced';
-  const audio = url.searchParams.get('audio') === '1';
+  const q = url.searchParams;
+  const quality = QUALITIES.has(q.get('quality')) ? q.get('quality') : 'high';
+  const priority = q.get('priority') === 'data' ? 'data' : 'speed';
+  const res = q.get('res') === 'auto' || SCALES.has(q.get('res')) ? q.get('res') : '1';
+  const audio = q.get('audio') === '1';
+  const minFrameMs = priority === 'data' ? DATA_SAVER_FRAME_MS : 0;
+  const reshape = res !== '1' || quality === 'low' || quality === 'medium';
 
   const params = {
     hostname: rdp.hostname,
@@ -125,9 +135,8 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
     'server-layout': 'en-us-qwerty',
     timezone,
     ...BASE_PARAMS,
-    ...PRESETS[quality].params,
+    ...(quality === 'lossless' ? { 'force-lossless': 'true' } : {}),
   };
-  const { minFrameMs } = PRESETS[quality];
 
   connect();
 
@@ -137,11 +146,22 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
     const parser = new GuacParser();
     let handshakeDone = false;
     let lastSync = 0;
+    const toBrowser = (text) => { if (ws.readyState === ws.OPEN) ws.send(text); };
+    const scaler = reshape
+      ? createScaler({
+        scale: res === 'auto' ? null : Number(res),
+        target: { width, height },
+        quality,
+        send: toBrowser,
+        log,
+      })
+      : null;
     let closed = false;
 
     const closeAll = (code, reason) => {
       if (closed) return;
       closed = true;
+      scaler?.close();
       socket.destroy();
       if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) ws.close(code, reason);
     };
@@ -181,16 +201,16 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
             encode(['connect', ...values]),
         );
         handshakeDone = true;
-        log(`screen: connecting RDP ${rdp.hostname}:${rdp.port} (${quality}, browser ${width}x${height})`);
+        log(`screen: connecting RDP ${rdp.hostname}:${rdp.port} (quality ${quality}, ${priority}, scale ${res}, browser ${width}x${height})`);
 
         // First message tells the browser tunnel its UUID and marks it open.
         ws.send(encode(['', randomUUID()]));
         instructions = instructions.slice(argsIdx + 1);
       }
 
-      if (instructions.length && ws.readyState === ws.OPEN) {
-        ws.send(instructions.map((i) => i.raw).join(''));
-      }
+      if (!instructions.length) return;
+      if (scaler) scaler.push(instructions);
+      else toBrowser(instructions.map((i) => i.raw).join(''));
     });
 
     socket.on('error', (err) => {
@@ -219,7 +239,7 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
           return;
         }
       }
-      socket.write(msg);
+      socket.write(scaler ? scaler.mapInput(msg) : msg);
     });
 
     ws.on('close', () => closeAll(1000, ''));

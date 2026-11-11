@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -65,7 +67,41 @@ for (const [route, file] of Object.entries(vendor)) {
   app.get(route, (req, res) => res.sendFile(path.join(root, file), { maxAge: '1d' }));
 }
 
-app.use(express.static(path.join(root, 'public'), { index: 'index.html' }));
+// Page assets are served under /v/<content hash>/ so a deploy can never mix a new
+// page with cached old CSS or JS (iOS home-screen apps cache aggressively).
+// Relative imports inside app.js resolve under the same prefix.
+const publicDir = path.join(root, 'public');
+
+function assetVersion(dir) {
+  const hash = crypto.createHash('sha1');
+  const walk = (d) => {
+    for (const name of fs.readdirSync(d).sort()) {
+      const file = path.join(d, name);
+      if (fs.statSync(file).isDirectory()) walk(file);
+      else hash.update(name).update(fs.readFileSync(file));
+    }
+  };
+  walk(dir);
+  return hash.digest('hex').slice(0, 12);
+}
+
+function renderIndex(version) {
+  return fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8')
+    .replace(/(href|src)="\/(style\.css|app\.js|theme-init\.js)"/g, `$1="/v/${version}/$2"`);
+}
+
+// In dev, files change under a running server, so build the page per request.
+const staticVersion = config.insecureDev ? null : assetVersion(publicDir);
+const staticIndex = staticVersion && renderIndex(staticVersion);
+
+app.get(['/', '/index.html'], (req, res) => {
+  res.set('Cache-Control', 'no-cache').type('html').send(staticIndex ?? renderIndex('dev'));
+});
+app.use('/v/:version', express.static(publicDir, {
+  index: false,
+  ...(staticVersion ? { immutable: true, maxAge: '365d' } : { setHeaders: (r) => r.set('Cache-Control', 'no-cache') }),
+}));
+app.use(express.static(publicDir, { index: false, setHeaders: (r) => r.set('Cache-Control', 'no-cache') }));
 
 app.use((err, req, res, _next) => {
   log(`error: ${err.stack || err}`);

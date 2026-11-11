@@ -5,7 +5,9 @@ const phone = matchMedia('(max-width: 640px)').matches;
 
 export const DEFAULTS = {
   theme: 'system', // system | light | dark
-  quality: 'balanced', // fast | balanced | best
+  resolution: 'auto', // auto | 1 | 0.75 | 0.5 | 0.33 (scale of the desktop's native size)
+  quality: 'high', // low | medium | high | lossless
+  priority: 'speed', // speed: every frame | data: about 10 frames per second
   touchScroll: 'natural', // natural | reversed
   termTheme: 'deskport-dark',
   termFont: 'system',
@@ -23,7 +25,14 @@ function load() {
   }
 }
 
-const values = { ...DEFAULTS, ...load() };
+// Earlier versions had one three-step quality preset.
+function migrate(saved) {
+  const old = { fast: ['medium', 'data'], balanced: ['high', 'speed'], best: ['lossless', 'speed'] }[saved.quality];
+  if (old) [saved.quality, saved.priority] = old;
+  return saved;
+}
+
+const values = { ...DEFAULTS, ...migrate(load()) };
 const listeners = new Set();
 
 export const settings = {

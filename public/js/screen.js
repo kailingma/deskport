@@ -281,13 +281,17 @@ export function createScreen({ wsBase, setStatus, toast }) {
     keyboard.onkeydown = (keysym) => { client?.sendKeyEvent(1, keysym); return false; };
     keyboard.onkeyup = (keysym) => { client?.sendKeyEvent(0, keysym); };
 
+    // Device pixels to fill. On touch screens leave room to pinch-zoom 2x and stay sharp.
     const ratio = window.devicePixelRatio || 1;
+    const headroom = matchMedia('(pointer: coarse)').matches ? 2 : 1;
     const params = new URLSearchParams({
-      width: String(Math.round(wrap.clientWidth * ratio)),
-      height: String(Math.round(wrap.clientHeight * ratio)),
+      width: String(Math.round(wrap.clientWidth * ratio * headroom)),
+      height: String(Math.round(wrap.clientHeight * ratio * headroom)),
       dpi: String(Math.round(96 * ratio)),
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
       quality: settings.get('quality'),
+      priority: settings.get('priority'),
+      res: settings.get('resolution'),
     });
     c.connect(params.toString());
   }
@@ -365,5 +369,10 @@ export function createScreen({ wsBase, setStatus, toast }) {
     sendClipboard,
     rescale,
     resetZoom() { zoom = 1; rescale(); },
+    /** Size of the picture being received, or null before the first frame. */
+    pictureSize() {
+      const d = client?.getDisplay();
+      return d?.getWidth() ? [d.getWidth(), d.getHeight()] : null;
+    },
   };
 }

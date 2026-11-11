@@ -131,13 +131,19 @@ handle.addEventListener('click', wakeBar);
 // ---------- settings ----------
 
 const settingsDialog = $('settings');
-const QUALITY = ['fast', 'balanced', 'best'];
+const QUALITY = ['low', 'medium', 'high', 'lossless'];
 const QUALITY_HELP = {
-  fast: 'About 10 frames per second. Uses less data and less battery.',
-  balanced: 'Full frame rate, compressed while the picture is changing.',
-  best: 'Lossless picture. In testing it used 40 to 70% more data than Balanced.',
+  low: 'Low: heavily compressed, smallest and quickest to arrive.',
+  medium: 'Medium: compressed, text stays readable.',
+  high: 'High: sharp, compressed only while the picture changes.',
+  lossless: 'Lossless: exact pixels. Uses the most data.',
 };
-let qualityAtOpen = null;
+const PRIORITY_HELP = {
+  speed: 'Every frame is sent as soon as it is ready.',
+  data: 'About 10 frames per second, to save data and battery.',
+};
+const SCREEN_SETTINGS = ['resolution', 'quality', 'priority'];
+let screenAtOpen = '';
 
 function fillSelect(id, entries) {
   $(id).replaceChildren(...Object.entries(entries).map(([value, { label }]) => new Option(label, value)));
@@ -154,8 +160,11 @@ function syncSettingsForm() {
       b.tabIndex = on ? 0 : -1;
     }
   }
+  $('set-resolution').value = settings.get('resolution');
+  const size = screen.pictureSize();
+  $('resolution-help').textContent = size ? `Receiving ${size[0]} × ${size[1]} pixels.` : '';
   $('set-quality').value = String(QUALITY.indexOf(settings.get('quality')));
-  $('quality-help').textContent = QUALITY_HELP[settings.get('quality')];
+  $('quality-help').textContent = `${QUALITY_HELP[settings.get('quality')]} ${PRIORITY_HELP[settings.get('priority')]}`;
   $('set-term-theme').value = settings.get('termTheme');
   $('set-term-font').value = settings.get('termFont');
   $('set-term-size').value = String(settings.get('termFontSize'));
@@ -190,17 +199,20 @@ settingsDialog.addEventListener('input', (e) => {
   else if (t.dataset.setting) settings.set(t.dataset.setting, t.value);
   syncSettingsForm();
 });
+const screenSettings = () => SCREEN_SETTINGS.map((k) => settings.get(k)).join('|');
+
 settingsDialog.addEventListener('close', () => {
-  if (settings.get('quality') !== qualityAtOpen && view === 'screen') {
+  if (screenSettings() === screenAtOpen) return;
+  if (view === 'screen') {
     screen.reconnect();
-    toast('Reconnecting with the new picture quality');
-  } else if (settings.get('quality') !== qualityAtOpen) {
+    toast('Reconnecting with the new picture settings');
+  } else {
     screen.markStale();
   }
 });
 
 function openSettings() {
-  qualityAtOpen = settings.get('quality');
+  screenAtOpen = screenSettings();
   syncSettingsForm();
   settingsDialog.showModal();
 }
