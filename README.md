@@ -1,66 +1,77 @@
 # deskport
 
-This computer's live screen and a persistent terminal in one browser tab, served from this machine through a Cloudflare Tunnel and gated by Cloudflare Access.
+A Linux desktop's live screen and a persistent terminal in one browser tab. It is served from the machine itself through a Cloudflare Tunnel and gated by Cloudflare Access.
 
-- **Screen**: GNOME's built-in desktop sharing (RDP, port 3390) → `guacd` (Docker, 127.0.0.1:4822) → WebSocket → `guacamole-common-js` in the browser. You see and control what is on the physical monitor.
-- **Terminal**: `xterm.js` → WebSocket → `node-pty` → `tmux new-session -A -s web`. Closing the tab detaches; programs keep running. Reattach from any device, or locally with `tmux attach -t web`.
-- **Auth**: Cloudflare Access in front, and the server itself verifies the `Cf-Access-Jwt-Assertion` JWT (issuer, audience, signature) on every request and WebSocket upgrade. WebSocket upgrades also need a same-origin `Origin`. The server only binds to loopback.
+- **Screen** shows the real logged-in GNOME session (what is on the monitor), with mouse, keyboard, touch and clipboard. It uses GNOME's built-in RDP desktop sharing and Apache guacd.
+- **Terminal** is a tmux session (`web` by default) in xterm.js. Closing the tab only detaches; programs keep running. You can attach to the same session locally with `tmux attach -t web`.
+- **Access**: only Cloudflare Access can reach it, and the server checks the Access token itself on every request and WebSocket.
+
+It works in desktop browsers, on iPad, and on iPhone. On a phone it uses a bottom tab bar and a row of extra keys, and you can add it to the home screen.
 
 ```
-browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared ──▶ deskport :7900
+browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared ──▶ deskport :7900 (loopback)
                                                                    ├─ /ws/screen ─▶ guacd :4822 ─RDP─▶ gnome-remote-desktop :3390
-                                                                   └─ /ws/term   ─▶ node-pty ─▶ tmux "web"
+                                                                   └─ /ws/term   ─▶ node-pty ─▶ tmux
 ```
 
-## Keys
+## Using it
 
-| Key | Action |
+### Desktop and iPad
+
+| Control | What it does |
 | --- | --- |
-| Alt+1 / Alt+2 | Switch between Screen and Terminal |
-| Full-screen button | Full screen. In Chrome it also captures Esc, Super and Alt+Tab for the remote side |
-| Clipboard button | Sends your local clipboard to the remote desktop. Copying on the remote side fills your local clipboard |
+| Screen / Terminal (Alt+1 / Alt+2) | Switch views. Both stay connected in the background. |
+| Clipboard button | Sends your local clipboard to the remote desktop; paste there with Ctrl+V. Copying on the remote desktop fills your local clipboard. |
+| Grid button | Presses Super (opens Activities). |
+| Ctrl+Alt+Del | Sends Ctrl+Alt+Delete. |
+| Full screen button | Hides the browser chrome. The top bar becomes a floating toolbar that slides away after a few seconds; move the pointer to the top edge or click the handle to bring it back. In Chrome, full screen also passes Esc, Super and Alt+Tab to the remote desktop. |
 
-## Files outside the repo
+### iPhone
 
-| Path | What |
-| --- | --- |
-| `~/.config/deskport/deskport.env` | `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, optional `DESKPORT_ALLOWED_EMAILS` (see `deskport.env.example`) |
-| `~/.config/deskport/rdp.env` | Generated RDP username/password that GNOME desktop sharing accepts |
-| `~/.config/deskport/rdp-tls.{crt,key}` | Self-signed TLS cert for GNOME desktop sharing |
-| `~/.cloudflared/deskport.yml` | Tunnel ingress (see `deploy/cloudflared.example.yml`) |
+- **Bottom tab bar**: Screen, Terminal, and More. More opens a sheet with Show keyboard, Send clipboard, Press Super, Send Ctrl+Alt+Delete and Reconnect.
+- **Key row**: Esc, Tab, Ctrl, Alt, the arrow keys, and `/ - | ~`. It appears above the on-screen keyboard, and always in the Terminal view. Ctrl and Alt stay on for the next key you press, so Ctrl then `c` sends Ctrl+C.
+- **Touch on the Screen view**: tap to click, and press and drag to drag. Two fingers moved up or down scroll the remote desktop. Pinch to zoom in. While zoomed in, dragging with two fingers pans the view.
+- **Full screen**: iPhone Safari has no full-screen mode for web pages. Use Share, then Add to Home Screen, to get deskport without Safari's toolbars.
 
-## Run
+### Connection states
 
-```bash
-npm install
-npm test
-npm run dev        # http://127.0.0.1:7900, Access checks OFF, for local testing only
-```
+The badge in the top bar shows the current view's connection state: Connecting, Connected, Reconnecting (the terminal retries with backoff), Disconnected, or Error. If the screen connects but no picture arrives within 12 seconds, deskport says so and tells you how to restart GNOME desktop sharing.
 
-Production runs as systemd user services (lingering is on, so they run without a login):
+## Setup
+
+[docs/setup.md](docs/setup.md) covers everything from a fresh machine to a working URL. In short:
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d
-ln -sf ~/code/deskport/deploy/deskport.service ~/.config/systemd/user/
-ln -sf ~/code/deskport/deploy/deskport-tunnel.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now deskport deskport-tunnel
-journalctl --user -u deskport -f
+npm install && npm test
+./scripts/setup-rdp.sh                              # GNOME desktop sharing on port 3390
+docker compose -f deploy/docker-compose.yml up -d   # guacd on 127.0.0.1:4822
+npm run dev                                         # try it at http://127.0.0.1:7900, Access checks off
+# create the tunnel and Access application (see docs/setup.md), then:
+./scripts/install-services.sh                       # systemd user services
 ```
 
-GNOME desktop sharing setup (already done on this machine):
+Configuration lives outside the repo in `~/.config/deskport/` (see [deskport.env.example](deskport.env.example)) and `~/.cloudflared/deskport.yml`.
+
+## Documentation
+
+- [docs/setup.md](docs/setup.md): install, Cloudflare Tunnel and Access, services, troubleshooting.
+- [docs/architecture.md](docs/architecture.md): request flow, authentication, the Guacamole bridge, the terminal, and which process listens where.
+- [PRODUCT.md](PRODUCT.md): who it is for and the constraints the UI follows.
+
+## Development
 
 ```bash
-grdctl rdp set-tls-cert ~/.config/deskport/rdp-tls.crt
-grdctl rdp set-tls-key ~/.config/deskport/rdp-tls.key
-grdctl rdp set-credentials "$RDP_USERNAME" "$RDP_PASSWORD"
-grdctl rdp set-port 3390 && grdctl rdp disable-port-negotiation
-grdctl rdp disable-view-only && grdctl rdp enable
-systemctl --user enable --now gnome-remote-desktop
+npm run dev      # watch mode, Access checks off, loopback only
+npm test         # protocol parser tests
+npm run check    # syntax check of every source file
+node scripts/make-icons.mjs   # regenerate public/icons/*.png
 ```
 
-## Notes
+There is no build step. The page is plain ES modules; browser libraries (guacamole-common-js, xterm.js, Inter) are served from `node_modules` under `/vendor/`.
 
-- `node-pty` is a native module built for the Node version in use (fnm `default`, Node 24). After changing the default Node major version, run `npm rebuild node-pty`.
-- Desktop sharing needs a logged-in GNOME session. If the screen is locked, you see the lock screen and can unlock it remotely.
-- GNOME desktop sharing listens on all interfaces on port 3390, protected by its own username/password and TLS. Block it in a firewall if this machine is on an untrusted LAN; deskport only needs it on loopback.
+## Limits
+
+- The desktop must have a logged-in GNOME session. A locked screen shows the lock screen, which you can unlock remotely.
+- One screen is shared: the primary monitor, at its own resolution, scaled to fit your window.
+- GNOME desktop sharing listens on all interfaces on its port. Firewall it if the machine is on an untrusted network.
+- `node-pty` is a native module. After changing Node major versions, run `npm rebuild node-pty` and `./scripts/install-services.sh`.

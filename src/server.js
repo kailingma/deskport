@@ -55,6 +55,7 @@ const vendor = {
   '/vendor/xterm.css': 'node_modules/@xterm/xterm/css/xterm.css',
   '/vendor/addon-fit.mjs': 'node_modules/@xterm/addon-fit/lib/addon-fit.mjs',
   '/vendor/addon-web-links.mjs': 'node_modules/@xterm/addon-web-links/lib/addon-web-links.mjs',
+  '/vendor/inter.woff2': 'node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2',
 };
 for (const [route, file] of Object.entries(vendor)) {
   app.get(route, (req, res) => res.sendFile(path.join(root, file), { maxAge: '1d' }));
