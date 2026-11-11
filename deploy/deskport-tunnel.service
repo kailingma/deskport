@@ -1,0 +1,13 @@
+[Unit]
+Description=Cloudflare Tunnel for deskport
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/cloudflared tunnel --no-autoupdate --config %h/.cloudflared/deskport.yml run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

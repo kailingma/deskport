@@ -1,0 +1,7 @@
+# Copy to ~/.cloudflared/deskport.yml and fill in the tunnel ID.
+tunnel: <TUNNEL_ID>
+credentials-file: /home/<user>/.cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: desk.example.com
+    service: http://127.0.0.1:7900
+  - service: http_status:404

@@ -1,0 +1,10 @@
+# guacd: the Guacamole proxy daemon that speaks RDP to GNOME desktop sharing.
+# Host networking so it can reach 127.0.0.1:3390; it listens on 127.0.0.1:4822 only.
+services:
+  guacd:
+    image: guacamole/guacd:1.6.0
+    container_name: deskport-guacd
+    restart: unless-stopped
+    network_mode: host
+    entrypoint: ["/opt/guacamole/sbin/guacd"]
+    command: ["-b", "127.0.0.1", "-l", "4822", "-L", "info", "-f"]

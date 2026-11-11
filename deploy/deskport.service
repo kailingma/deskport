@@ -1,0 +1,15 @@
+[Unit]
+Description=deskport (screen + terminal in the browser)
+After=network-online.target gnome-remote-desktop.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/code/deskport
+ExecStart=%h/.local/share/fnm/aliases/default/bin/node src/server.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target
