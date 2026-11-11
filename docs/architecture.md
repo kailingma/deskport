@@ -67,6 +67,8 @@ The browser passes three picture settings in the query string: `res` (`auto`, `1
   - For `auto`, the scale is chosen when guacd reports the desktop size: the largest picture that fits the browser's device pixels (twice that on touch screens, for pinch-zoom headroom). Output is held until then.
   - Moved regions (`copy`) are rounded to whole pixels at the smaller size, so a scrolled area can sit up to half a pixel off until it is redrawn.
 
+`source=virtual` (opt-in) switches GNOME desktop sharing to extend mode through `gsettings` before connecting and sets `resize-method=display-update`: GNOME creates a virtual monitor at the browser's size, and `size` instructions the browser sends when its window changes resize it. Mirror sessions switch `screen-share-mode` back to `mirror-primary` if needed. The scaler never shrinks a virtual display.
+
 Audio is not requested. The screen WebSocket uses permessage-deflate at zlib level 1: the images travel as base64, and compression wins back most of that overhead. The credentials never reach the browser.
 
 GNOME's mirror mode always streams the monitor at its native size. An earlier version switched the physical monitor to a lower mode during sessions; on a monitor connected to two GPUs that left one output unable to draw until the user logged out, so that code was removed.

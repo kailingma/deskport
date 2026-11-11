@@ -5,6 +5,7 @@ const phone = matchMedia('(max-width: 640px)').matches;
 
 export const DEFAULTS = {
   theme: 'system', // system | light | dark
+  source: 'mirror', // mirror: the physical monitor | virtual: a GNOME virtual monitor sized to this device (experimental)
   resolution: 'auto', // auto | 1 | 0.75 | 0.5 | 0.33 (scale of the desktop's native size)
   quality: 'high', // low | medium | high | lossless
   priority: 'speed', // speed: every frame | data: about 10 frames per second

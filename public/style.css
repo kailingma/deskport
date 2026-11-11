@@ -303,6 +303,9 @@ main { flex: 1; position: relative; min-height: 0; }
   touch-action: none;
 }
 .display-wrap > div { box-shadow: 0 0 0 1px oklch(1 0 0 / 0.06); }
+/* Layers come and go as the desktop redraws; touches and clicks land on the stable display element. */
+.display-wrap > div * { pointer-events: none; }
+.display-wrap { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 
 .term-wrap {
   position: absolute; inset: 0;
@@ -574,6 +577,7 @@ body.keyrow-never .keyrow { display: none !important; }
   cursor: pointer;
 }
 .select:hover { border-color: var(--border-strong); }
+.select:disabled { opacity: 0.5; cursor: default; }
 
 input[type="range"] {
   width: 100%;

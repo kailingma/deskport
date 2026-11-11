@@ -1,6 +1,8 @@
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createScaler } from './scaler.js';
 
 // Guacamole protocol: each element is "<length>.<value>", elements are
@@ -98,6 +100,23 @@ const QUALITIES = new Set(['low', 'medium', 'high', 'lossless']);
 const SCALES = new Set(['1', '0.75', '0.5', '0.33']);
 const DATA_SAVER_FRAME_MS = 100;
 
+// Screen source. "mirror" shares the physical monitor. "virtual" (experimental,
+// off by default in the settings) switches GNOME desktop sharing to extend mode:
+// GNOME adds a virtual monitor sized to the browser for the session and resizes
+// it as the browser window changes. That reconfigures GNOME's monitors while
+// connected, so it is opt-in.
+const run = promisify(execFile);
+async function setShareMode(mode, log) {
+  try {
+    const { stdout } = await run('gsettings', ['get', 'org.gnome.desktop.remote-desktop.rdp', 'screen-share-mode']);
+    if (stdout.trim() === `'${mode}'`) return;
+    await run('gsettings', ['set', 'org.gnome.desktop.remote-desktop.rdp', 'screen-share-mode', mode]);
+    log(`screen: GNOME desktop sharing set to ${mode}`);
+  } catch (err) {
+    log(`screen: could not set screen-share-mode to ${mode}: ${err.message}`);
+  }
+}
+
 const BASE_PARAMS = {
   'color-depth': '24',
   'enable-font-smoothing': 'true',
@@ -122,7 +141,9 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
   const res = q.get('res') === 'auto' || SCALES.has(q.get('res')) ? q.get('res') : '1';
   const audio = q.get('audio') === '1';
   const minFrameMs = priority === 'data' ? DATA_SAVER_FRAME_MS : 0;
-  const reshape = res !== '1' || quality === 'low' || quality === 'medium';
+  const virtual = q.get('source') === 'virtual';
+  // A virtual display is already the browser's size, so it never needs shrinking.
+  const reshape = (!virtual && res !== '1') || quality === 'low' || quality === 'medium';
 
   const params = {
     hostname: rdp.hostname,
@@ -132,13 +153,16 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
     security: 'any',
     'ignore-cert': 'true',
     'disable-audio': audio ? 'false' : 'true',
+    ...(virtual ? { 'resize-method': 'display-update' } : {}),
     'server-layout': 'en-us-qwerty',
     timezone,
     ...BASE_PARAMS,
     ...(quality === 'lossless' ? { 'force-lossless': 'true' } : {}),
   };
 
-  connect();
+  setShareMode(virtual ? 'extend' : 'mirror-primary', log).then(() => {
+    if (ws.readyState === ws.OPEN) connect();
+  });
 
   function connect() {
     const socket = net.connect(guacd.port, guacd.host);
@@ -149,7 +173,7 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
     const toBrowser = (text) => { if (ws.readyState === ws.OPEN) ws.send(text); };
     const scaler = reshape
       ? createScaler({
-        scale: res === 'auto' ? null : Number(res),
+        scale: virtual ? 1 : res === 'auto' ? null : Number(res),
         target: { width, height },
         quality,
         send: toBrowser,
@@ -201,7 +225,7 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
             encode(['connect', ...values]),
         );
         handshakeDone = true;
-        log(`screen: connecting RDP ${rdp.hostname}:${rdp.port} (quality ${quality}, ${priority}, scale ${res}, browser ${width}x${height})`);
+        log(`screen: connecting RDP ${rdp.hostname}:${rdp.port} (${virtual ? 'virtual display' : 'mirror'}, quality ${quality}, ${priority}, scale ${virtual ? 'n/a' : res}, browser ${width}x${height})`);
 
         // First message tells the browser tunnel its UUID and marks it open.
         ws.send(encode(['', randomUUID()]));

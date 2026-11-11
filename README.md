@@ -36,11 +36,12 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
   | Gesture | Does |
   | --- | --- |
   | Tap | Left click |
-  | Drag | Scrolls the remote desktop, with momentum |
+  | Drag | Scrolls the remote desktop, with momentum. When zoomed in, moves around the picture instead. |
+  | Two-finger drag | Scrolls the remote desktop |
+  | Pinch | Zooms this view |
   | Long press, then drag | Drags with the left button held (move windows, select text) |
   | Long press, then release | Right click |
   | Two-finger tap | Right click |
-  | Pinch, or drag with two fingers | Zooms and pans this view |
 
 - **Touch in the Terminal view**: drag to scroll (tmux scrollback when tmux has the mouse, which it does with `set -g mouse on`), long press then drag to select. tmux copies the selection to its buffer when you lift your finger.
 - **Full screen**: iPhone Safari has no full-screen mode for web pages. Use Share, then Add to Home Screen, to get deskport without Safari's toolbars.
@@ -52,6 +53,7 @@ The sliders button in the top bar (or More, then Settings, on a phone) opens the
 | Setting | Options |
 | --- | --- |
 | Theme | System, Light, Dark |
+| Show | My monitor (default), or Virtual display (experimental, see below) |
 | Resolution | Auto (fits this screen, with room to pinch-zoom 2x on touch screens), Full size, 75%, 50%, 33% |
 | Picture quality | Low, Medium, High, Lossless |
 | Prioritize | Responsiveness (every frame) or Data use (about 10 frames per second) |
@@ -61,7 +63,9 @@ The sliders button in the top bar (or More, then Settings, on a phone) opens the
 | Cursor | Block, bar or underline; blinking on or off |
 | Extra key row | Auto (on phones in the terminal and when a keyboard is up), always, never |
 
-Resolution, picture quality and priority apply when you close settings; the screen reconnects.
+Screen settings apply when you close settings; the screen reconnects.
+
+**Virtual display (experimental, untested).** Instead of mirroring your monitor, GNOME adds a virtual monitor shaped to the device you connect from, and resizes it when the window changes or the phone rotates. The desktop rearranges for it like a second monitor; move windows onto it to see them. Turning it on changes GNOME's monitor layout while you're connected. That kind of change once left this machine's display unable to draw until a re-login, so it is off by default. If the screen misbehaves, switch back to My monitor and log out and in.
 
 ### Speed
 
@@ -109,6 +113,8 @@ Configuration lives outside the repo in `~/.config/deskport/` (see [deskport.env
 - [docs/setup.md](docs/setup.md): install, Cloudflare Tunnel and Access, services, troubleshooting.
 - [docs/architecture.md](docs/architecture.md): request flow, authentication, the Guacamole bridge, the terminal, and which process listens where.
 - [PRODUCT.md](PRODUCT.md): who it is for and the constraints the UI follows.
+- [DESIGN.md](DESIGN.md): the design system.
+- [docs/decisions.md](docs/decisions.md): why things are the way they are.
 
 ## Development
 

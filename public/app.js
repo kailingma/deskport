@@ -142,7 +142,11 @@ const PRIORITY_HELP = {
   speed: 'Every frame is sent as soon as it is ready.',
   data: 'About 10 frames per second, to save data and battery.',
 };
-const SCREEN_SETTINGS = ['resolution', 'quality', 'priority'];
+const SCREEN_SETTINGS = ['source', 'resolution', 'quality', 'priority'];
+const SOURCE_HELP = {
+  mirror: 'Shows exactly what is on your monitor, at its resolution.',
+  virtual: 'Experimental: GNOME adds a virtual monitor shaped to this device while you are connected, and the desktop rearranges for it. Move windows onto it to see them. It changes GNOME\'s monitor layout, which has upset this machine\'s display before; if the screen misbehaves, switch back and log out and in.',
+};
 let screenAtOpen = '';
 
 function fillSelect(id, entries) {
@@ -160,7 +164,9 @@ function syncSettingsForm() {
       b.tabIndex = on ? 0 : -1;
     }
   }
+  $('source-help').textContent = SOURCE_HELP[settings.get('source')];
   $('set-resolution').value = settings.get('resolution');
+  $('set-resolution').disabled = settings.get('source') === 'virtual';
   const size = screen.pictureSize();
   $('resolution-help').textContent = size ? `Receiving ${size[0]} × ${size[1]} pixels.` : '';
   $('set-quality').value = String(QUALITY.indexOf(settings.get('quality')));

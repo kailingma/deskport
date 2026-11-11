@@ -12,11 +12,13 @@ const MOVE_SLOP = 10;
  *
  * Touch, handled here instead of by Guacamole's own touch modes:
  *   tap                      left click
- *   drag                     scroll the remote desktop (with momentum)
+ *   drag                     scroll the remote desktop (with momentum);
+ *                            when zoomed in, move around the picture instead
+ *   two-finger drag          scroll the remote desktop
+ *   pinch                    zoom this view (and pan while pinching)
  *   long press, then drag    drag with the left button held
  *   long press, release      right click
  *   two-finger tap           right click
- *   pinch / two-finger drag  zoom and pan this view
  */
 export function createScreen({ wsBase, setStatus, toast }) {
   const wrap = $('display-wrap');
@@ -104,6 +106,24 @@ export function createScreen({ wsBase, setStatus, toast }) {
   };
   const hideRing = () => { ring.hidden = true; };
 
+  // Touch listeners: start on the wrap; move/end on the window, because the
+  // element a touch started on can be removed by the display mid-gesture, and
+  // its later events would then never reach the wrap.
+  const PAN_STEP = 1;
+
+  function startTwo(t, timeStamp) {
+    const mid = touchMid(t);
+    const rect = wrap.getBoundingClientRect();
+    const scale = client.getDisplay().getScale() || 1;
+    const off = contentOffset();
+    g = {
+      kind: 'two', t0: timeStamp, mode: null, dist: touchDist(t), zoom, mid, lastY: mid.y,
+      // content point under the fingers, in remote pixels
+      cx: (wrap.scrollLeft + mid.x - rect.left - off.x) / scale,
+      cy: (wrap.scrollTop + mid.y - rect.top - off.y) / scale,
+    };
+  }
+
   function onTouchStart(e) {
     if (!client) return;
     e.stopPropagation();
@@ -111,9 +131,13 @@ export function createScreen({ wsBase, setStatus, toast }) {
     scroller.stop();
     const t = e.touches;
 
-    if (t.length === 1 && !g) {
+    if (t.length === 1) {
+      // A lone new finger always starts a fresh gesture, whatever state was left behind.
+      if (g?.timer) clearTimeout(g.timer);
+      if (g?.mode === 'drag') mouse(g.x, g.y);
+      hideRing();
       const p = t[0];
-      g = { kind: 'one', x0: p.clientX, y0: p.clientY, x: p.clientX, y: p.clientY, mode: null, lastY: p.clientY };
+      g = { kind: 'one', x0: p.clientX, y0: p.clientY, x: p.clientX, y: p.clientY, lastX: p.clientX, lastY: p.clientY, mode: null };
       g.timer = setTimeout(() => {
         if (g?.kind === 'one' && !g.mode) {
           g.mode = 'armed';
@@ -129,22 +153,13 @@ export function createScreen({ wsBase, setStatus, toast }) {
         if (g.mode === 'drag') mouse(g.x, g.y);
         hideRing();
       }
-      const mid = touchMid(t);
-      const rect = wrap.getBoundingClientRect();
-      const scale = client.getDisplay().getScale() || 1;
-      const off = contentOffset();
-      g = {
-        kind: 'two', t0: e.timeStamp, moved: false, dist: touchDist(t), zoom, mid,
-        // content point under the fingers, in remote pixels
-        cx: (wrap.scrollLeft + mid.x - rect.left - off.x) / scale,
-        cy: (wrap.scrollTop + mid.y - rect.top - off.y) / scale,
-      };
+      startTwo(t, e.timeStamp);
     }
   }
 
   function onTouchMove(e) {
     if (!g) return;
-    e.stopPropagation();
+    if (document.getElementById('view-screen').hidden) { g = null; return; }
     e.preventDefault();
     const t = e.touches;
 
@@ -152,16 +167,18 @@ export function createScreen({ wsBase, setStatus, toast }) {
       const p = t[0];
       g.x = p.clientX;
       g.y = p.clientY;
-      const far = Math.hypot(g.x - g.x0, g.y - g.y0) > MOVE_SLOP;
-      if (!g.mode && far) {
+      if (!g.mode && Math.hypot(g.x - g.x0, g.y - g.y0) > MOVE_SLOP) {
         clearTimeout(g.timer);
-        g.mode = 'scroll';
+        // Zoomed in, one finger moves around the picture; otherwise it scrolls the desktop.
+        g.mode = zoom > 1 ? 'pan' : 'scroll';
         scrollAt = { x: g.x0, y: g.y0 };
         scroller.start(e.timeStamp);
       }
       if (g.mode === 'scroll') {
         scroller.move(g.y - g.lastY, e.timeStamp);
-        g.lastY = g.y;
+      } else if (g.mode === 'pan') {
+        wrap.scrollLeft -= (g.x - g.lastX) * PAN_STEP;
+        wrap.scrollTop -= (g.y - g.lastY) * PAN_STEP;
       } else if (g.mode === 'armed' && Math.hypot(g.x - g.x0, g.y - g.y0) > 4) {
         g.mode = 'drag';
         mouse(g.x0, g.y0);
@@ -171,14 +188,28 @@ export function createScreen({ wsBase, setStatus, toast }) {
         mouse(g.x, g.y, { left: true });
         showRing(g.x, g.y, 'drag');
       }
+      g.lastX = g.x;
+      g.lastY = g.y;
       return;
     }
 
     if (g.kind === 'two' && t.length === 2) {
       const mid = touchMid(t);
       const ratio = touchDist(t) / g.dist;
-      if (Math.abs(ratio - 1) > 0.04 || Math.hypot(mid.x - g.mid.x, mid.y - g.mid.y) > MOVE_SLOP) g.moved = true;
-      if (!g.moved) return;
+      // Fingers spreading or pinching zoom; fingers moving together scroll the desktop.
+      if (!g.mode) {
+        if (Math.abs(ratio - 1) > 0.08) g.mode = 'zoom';
+        else if (Math.hypot(mid.x - g.mid.x, mid.y - g.mid.y) > MOVE_SLOP) {
+          g.mode = 'scroll';
+          scrollAt = { x: g.mid.x, y: g.mid.y };
+          scroller.start(e.timeStamp);
+        } else return;
+      }
+      if (g.mode === 'scroll') {
+        scroller.move(mid.y - g.lastY, e.timeStamp);
+        g.lastY = mid.y;
+        return;
+      }
       zoom = Math.min(5, Math.max(1, g.zoom * ratio));
       rescale();
       const scale = client.getDisplay().getScale();
@@ -191,9 +222,14 @@ export function createScreen({ wsBase, setStatus, toast }) {
 
   function onTouchEnd(e) {
     if (!g) return;
-    e.stopPropagation();
+    if (document.getElementById('view-screen').hidden) { g = null; return; }
     e.preventDefault();
-    if (e.touches.length) return; // wait for every finger to lift
+    if (e.touches.length) {
+      // Two fingers down to one: stop that gesture; the remaining finger does nothing until lifted.
+      if (g.kind === 'two' && g.mode === 'scroll') scroller.release(e.timeStamp);
+      if (g.kind === 'two') g = { kind: 'done' };
+      return;
+    }
 
     if (g.kind === 'one') {
       clearTimeout(g.timer);
@@ -203,15 +239,17 @@ export function createScreen({ wsBase, setStatus, toast }) {
       else if (g.mode === 'drag') mouse(g.x, g.y);
       hideRing();
     } else if (g.kind === 'two') {
-      if (!g.moved && e.timeStamp - g.t0 < 350) click(g.mid.x, g.mid.y, 'right');
-      if (zoom < 1.05 && zoom !== 1) { zoom = 1; rescale(); }
+      if (!g.mode && e.timeStamp - g.t0 < 350) click(g.mid.x, g.mid.y, 'right');
+      else if (g.mode === 'scroll') scroller.release(e.timeStamp);
     }
+    if (zoom < 1.05 && zoom !== 1) { zoom = 1; rescale(); }
     g = null;
   }
 
-  for (const [type, fn] of [['touchstart', onTouchStart], ['touchmove', onTouchMove], ['touchend', onTouchEnd], ['touchcancel', onTouchEnd]]) {
-    wrap.addEventListener(type, fn, { capture: true, passive: false });
-  }
+  wrap.addEventListener('touchstart', onTouchStart, { capture: true, passive: false });
+  window.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+  window.addEventListener('touchend', onTouchEnd, { capture: true, passive: false });
+  window.addEventListener('touchcancel', onTouchEnd, { capture: true, passive: false });
 
   // ---------- connection ----------
 
@@ -281,9 +319,11 @@ export function createScreen({ wsBase, setStatus, toast }) {
     keyboard.onkeydown = (keysym) => { client?.sendKeyEvent(1, keysym); return false; };
     keyboard.onkeyup = (keysym) => { client?.sendKeyEvent(0, keysym); };
 
-    // Device pixels to fill. On touch screens leave room to pinch-zoom 2x and stay sharp.
+    // Device pixels to fill. On touch screens leave room to pinch-zoom 2x and stay
+    // sharp, except on a virtual display, which is made at exactly this size.
     const ratio = window.devicePixelRatio || 1;
-    const headroom = matchMedia('(pointer: coarse)').matches ? 2 : 1;
+    const virtual = settings.get('source') === 'virtual';
+    const headroom = !virtual && matchMedia('(pointer: coarse)').matches ? 2 : 1;
     const params = new URLSearchParams({
       width: String(Math.round(wrap.clientWidth * ratio * headroom)),
       height: String(Math.round(wrap.clientHeight * ratio * headroom)),
@@ -292,6 +332,7 @@ export function createScreen({ wsBase, setStatus, toast }) {
       quality: settings.get('quality'),
       priority: settings.get('priority'),
       res: settings.get('resolution'),
+      source: settings.get('source'),
     });
     c.connect(params.toString());
   }
@@ -353,7 +394,17 @@ export function createScreen({ wsBase, setStatus, toast }) {
     toast(`Sent ${text.length} characters. Paste with Ctrl+V on the remote desktop`);
   }
 
-  new ResizeObserver(rescale).observe(wrap);
+  // On a virtual display, ask GNOME to resize it when this window changes size or rotates.
+  let resizeTimer;
+  new ResizeObserver(() => {
+    rescale();
+    if (!client || settings.get('source') !== 'virtual') return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const ratio = window.devicePixelRatio || 1;
+      client?.sendSize(Math.round(wrap.clientWidth * ratio), Math.round(wrap.clientHeight * ratio));
+    }, 600);
+  }).observe(wrap);
   window.addEventListener('blur', () => keyboard?.reset());
 
   return {

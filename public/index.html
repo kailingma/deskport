@@ -160,6 +160,14 @@
       <section class="settings-group" aria-labelledby="sg-screen">
         <h3 id="sg-screen">Screen</h3>
         <div class="field">
+          <span class="field-label" id="lbl-source">Show</span>
+          <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-source" data-setting="source">
+            <button type="button" role="radio" data-value="mirror">My monitor</button>
+            <button type="button" role="radio" data-value="virtual">Virtual display</button>
+          </div>
+        </div>
+        <p class="field-help" id="source-help"></p>
+        <div class="field">
           <label class="field-label" for="set-resolution">Resolution</label>
           <select class="select" id="set-resolution" data-setting="resolution" aria-describedby="resolution-help">
             <option value="auto">Auto (fit this screen)</option>
