@@ -1,0 +1,347 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-11T23:05:22.960354Z",
+  "title": "Design System: deskport",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Dashboard Blue",
+        "canonical": "oklch(0.55 0.19 260)",
+        "tonalRamp": [
+          "oklch(20% 0.084 260)",
+          "oklch(30% 0.125 260)",
+          "oklch(40% 0.167 260)",
+          "oklch(50% 0.190 260)",
+          "oklch(60% 0.167 260)",
+          "oklch(70% 0.125 260)",
+          "oklch(80% 0.084 260)",
+          "oklch(93% 0.029 260)"
+        ]
+      },
+      "primary-dark": {
+        "role": "primary",
+        "displayName": "Dashboard Blue (dark)",
+        "canonical": "oklch(0.66 0.163 260)",
+        "tonalRamp": [
+          "oklch(20% 0.072 260)",
+          "oklch(30% 0.108 260)",
+          "oklch(40% 0.143 260)",
+          "oklch(50% 0.163 260)",
+          "oklch(60% 0.143 260)",
+          "oklch(70% 0.108 260)",
+          "oklch(80% 0.072 260)",
+          "oklch(93% 0.025 260)"
+        ]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Ground",
+        "canonical": "oklch(0.975 0 0)",
+        "tonalRamp": [
+          "oklch(20% 0.000 0)",
+          "oklch(30% 0.000 0)",
+          "oklch(40% 0.000 0)",
+          "oklch(50% 0.000 0)",
+          "oklch(60% 0.000 0)",
+          "oklch(70% 0.000 0)",
+          "oklch(80% 0.000 0)",
+          "oklch(93% 0.000 0)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "oklch(1 0 0)",
+        "tonalRamp": [
+          "oklch(20% 0.000 0)",
+          "oklch(30% 0.000 0)",
+          "oklch(40% 0.000 0)",
+          "oklch(50% 0.000 0)",
+          "oklch(60% 0.000 0)",
+          "oklch(70% 0.000 0)",
+          "oklch(80% 0.000 0)",
+          "oklch(93% 0.000 0)"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(0.9 0 0)",
+        "tonalRamp": [
+          "oklch(20% 0.000 0)",
+          "oklch(30% 0.000 0)",
+          "oklch(40% 0.000 0)",
+          "oklch(50% 0.000 0)",
+          "oklch(60% 0.000 0)",
+          "oklch(70% 0.000 0)",
+          "oklch(80% 0.000 0)",
+          "oklch(93% 0.000 0)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(0.21 0 0)",
+        "tonalRamp": [
+          "oklch(20% 0.000 0)",
+          "oklch(30% 0.000 0)",
+          "oklch(40% 0.000 0)",
+          "oklch(50% 0.000 0)",
+          "oklch(60% 0.000 0)",
+          "oklch(70% 0.000 0)",
+          "oklch(80% 0.000 0)",
+          "oklch(93% 0.000 0)"
+        ]
+      },
+      "state-ok": {
+        "role": "state",
+        "displayName": "OK green",
+        "canonical": "oklch(0.6 0.15 150)",
+        "tonalRamp": [
+          "oklch(20% 0.066 150)",
+          "oklch(30% 0.099 150)",
+          "oklch(40% 0.132 150)",
+          "oklch(50% 0.150 150)",
+          "oklch(60% 0.132 150)",
+          "oklch(70% 0.099 150)",
+          "oklch(80% 0.066 150)",
+          "oklch(93% 0.023 150)"
+        ]
+      },
+      "state-warn": {
+        "role": "state",
+        "displayName": "Busy amber",
+        "canonical": "oklch(0.7 0.15 75)",
+        "tonalRamp": [
+          "oklch(20% 0.066 75)",
+          "oklch(30% 0.099 75)",
+          "oklch(40% 0.132 75)",
+          "oklch(50% 0.150 75)",
+          "oklch(60% 0.132 75)",
+          "oklch(70% 0.099 75)",
+          "oklch(80% 0.066 75)",
+          "oklch(93% 0.023 75)"
+        ]
+      },
+      "state-bad": {
+        "role": "state",
+        "displayName": "Bad red",
+        "canonical": "oklch(0.58 0.21 27)",
+        "tonalRamp": [
+          "oklch(20% 0.092 27)",
+          "oklch(30% 0.139 27)",
+          "oklch(40% 0.185 27)",
+          "oklch(50% 0.210 27)",
+          "oklch(60% 0.185 27)",
+          "oklch(70% 0.139 27)",
+          "oklch(80% 0.092 27)",
+          "oklch(93% 0.032 27)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default text at 14px."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Dialog and Settings titles."
+      },
+      "brand": {
+        "displayName": "Brand",
+        "purpose": "The deskport wordmark."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Segments, text buttons, group headings."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Badge and notes."
+      },
+      "tab-label": {
+        "displayName": "Tab label",
+        "purpose": "Phone tab bar."
+      }
+    },
+    "shadows": [
+      {
+        "name": "float",
+        "value": "0 1px 2px oklch(0 0 0 / 0.06), 0 8px 24px oklch(0 0 0 / 0.12)",
+        "purpose": "Floating toolbar, dialogs, sheets, toast (light)."
+      },
+      {
+        "name": "float-dark",
+        "value": "0 1px 2px oklch(0 0 0 / 0.3), 0 12px 32px oklch(0 0 0 / 0.45)",
+        "purpose": "Same, dark theme."
+      },
+      {
+        "name": "selected-segment",
+        "value": "0 0 0 1px var(--border), 0 1px 2px oklch(0 0 0 / 0.06)",
+        "purpose": "Selected segmented item."
+      },
+      {
+        "name": "key",
+        "value": "0 1px 0 oklch(0 0 0 / 0.06)",
+        "purpose": "Extra-key buttons."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Toolbar, sheets, settings, toast."
+      },
+      {
+        "name": "control-transition",
+        "value": "0.15s",
+        "purpose": "Colour transitions on controls."
+      },
+      {
+        "name": "pulse",
+        "value": "1.4s ease-in-out infinite",
+        "purpose": "Busy connection dot."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "640px"
+      },
+      {
+        "name": "coarse-pointer",
+        "value": "(pointer: coarse)"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single filled action (Reconnect).",
+      "html": "<button class=\"ds-btn-primary\">Reconnect</button>",
+      "css": ".ds-btn-primary{height:36px;padding:0 16px;border:0;border-radius:8px;background:oklch(0.55 0.19 260);color:#fff;font:500 14px/1 'Inter Variable',system-ui,sans-serif;box-shadow:0 0 0 1px oklch(0.45 0.2 260),0 1px 2px oklch(0 0 0/.08);cursor:pointer}.ds-btn-primary:hover{filter:brightness(1.06)}.ds-btn-primary:focus-visible{outline:2px solid oklch(0.55 0.19 260);outline-offset:2px}"
+    },
+    {
+      "name": "Icon Button",
+      "kind": "button",
+      "refersTo": "button-ghost-icon",
+      "description": "Quiet toolbar button; fills on hover.",
+      "html": "<button class=\"ds-btn-icon\" aria-label=\"Settings\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 7h9M17 7h3M4 17h3M11 17h9\"/><circle cx=\"15\" cy=\"7\" r=\"2\"/><circle cx=\"9\" cy=\"17\" r=\"2\"/></svg></button>",
+      "css": ".ds-btn-icon{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:1px solid transparent;border-radius:8px;background:transparent;color:oklch(0.45 0 0);cursor:pointer;transition:background-color .15s,color .15s,border-color .15s}.ds-btn-icon:hover{background:oklch(0.955 0 0);border-color:oklch(0.9 0 0);color:oklch(0.21 0 0)}.ds-btn-icon:active{background:oklch(0.92 0 0)}.ds-btn-icon:focus-visible{outline:2px solid oklch(0.55 0.19 260);outline-offset:2px}"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "nav",
+      "refersTo": "segmented",
+      "description": "Screen/Terminal switch in the top bar.",
+      "html": "<div class=\"ds-seg\" role=\"tablist\"><button class=\"ds-seg-item\" aria-selected=\"true\">Screen</button><button class=\"ds-seg-item\" aria-selected=\"false\">Terminal</button></div>",
+      "css": ".ds-seg{display:inline-flex;gap:2px;padding:3px;background:oklch(0.955 0 0);border:1px solid oklch(0.9 0 0);border-radius:8px}.ds-seg-item{height:28px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:oklch(0.45 0 0);font:500 13px 'Inter Variable',system-ui,sans-serif;cursor:pointer;transition:background-color .15s,color .15s}.ds-seg-item:hover{color:oklch(0.21 0 0)}.ds-seg-item[aria-selected=true]{background:#fff;color:oklch(0.21 0 0);box-shadow:0 0 0 1px oklch(0.9 0 0),0 1px 2px oklch(0 0 0/.06)}.ds-seg-item:focus-visible{outline:2px solid oklch(0.55 0.19 260);outline-offset:2px}"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "status-badge",
+      "description": "Connection state, always visible.",
+      "html": "<span class=\"ds-badge\"><span class=\"ds-dot\"></span>Connected</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border:1px solid oklch(0.9 0 0);border-radius:999px;background:oklch(0.955 0 0);color:oklch(0.45 0 0);font:500 12px 'Inter Variable',system-ui,sans-serif}.ds-dot{width:7px;height:7px;border-radius:50%;background:oklch(0.6 0.15 150)}"
+    },
+    {
+      "name": "Floating Toolbar",
+      "kind": "nav",
+      "refersTo": "floating-toolbar",
+      "description": "Full-screen form of the top bar.",
+      "html": "<div class=\"ds-float\"><span class=\"ds-float-host\">ryzenpc</span><span class=\"ds-float-seg\">Screen</span><span class=\"ds-float-seg\">Terminal</span></div>",
+      "css": ".ds-float{display:inline-flex;align-items:center;gap:12px;height:48px;padding:0 14px;background:#fff;border:1px solid oklch(0.9 0 0);border-radius:12px;box-shadow:0 1px 2px oklch(0 0 0/.06),0 8px 24px oklch(0 0 0/.12);font:500 13px 'Inter Variable',system-ui,sans-serif;color:oklch(0.45 0 0)}.ds-float-host{color:oklch(0.45 0 0)}.ds-float-seg:first-of-type{color:oklch(0.21 0 0)}"
+    },
+    {
+      "name": "Extra Key",
+      "kind": "button",
+      "refersTo": "key",
+      "description": "Terminal key row button; Ctrl/Alt toggle blue.",
+      "html": "<div class=\"ds-keys\"><button class=\"ds-key\">Esc</button><button class=\"ds-key\">Tab</button><button class=\"ds-key\" aria-pressed=\"true\">Ctrl</button></div>",
+      "css": ".ds-keys{display:flex;gap:6px;padding:6px 8px;background:oklch(0.955 0 0);border-top:1px solid oklch(0.9 0 0)}.ds-key{min-width:44px;height:36px;padding:0 10px;border:1px solid oklch(0.9 0 0);border-radius:8px;background:#fff;color:oklch(0.21 0 0);font:500 14px 'Inter Variable',system-ui,sans-serif;box-shadow:0 1px 0 oklch(0 0 0/.06)}.ds-key:active{background:oklch(0.92 0 0)}.ds-key[aria-pressed=true]{background:oklch(0.55 0.19 260);border-color:oklch(0.45 0.2 260);color:#fff}"
+    },
+    {
+      "name": "Tab Bar",
+      "kind": "nav",
+      "refersTo": "tab-bar",
+      "description": "Phone bottom navigation.",
+      "html": "<nav class=\"ds-tabs\"><button class=\"ds-tab\" aria-selected=\"true\">Screen</button><button class=\"ds-tab\">Terminal</button><button class=\"ds-tab\">More</button></nav>",
+      "css": ".ds-tabs{display:flex;height:56px;background:#fff;border-top:1px solid oklch(0.9 0 0)}.ds-tab{flex:1;border:0;background:transparent;color:oklch(0.45 0 0);font:500 11px 'Inter Variable',system-ui,sans-serif}.ds-tab[aria-selected=true]{color:oklch(0.55 0.19 260)}"
+    },
+    {
+      "name": "Select Field",
+      "kind": "input",
+      "refersTo": "select",
+      "description": "Settings select.",
+      "html": "<select class=\"ds-select\"><option>deskport dark</option></select>",
+      "css": ".ds-select{min-width:180px;height:34px;padding:0 32px 0 10px;border:1px solid oklch(0.9 0 0);border-radius:8px;background:#fff;color:oklch(0.21 0 0);font:400 14px 'Inter Variable',system-ui,sans-serif}.ds-select:hover{border-color:oklch(0.82 0 0)}.ds-select:focus-visible{outline:2px solid oklch(0.55 0.19 260);outline-offset:2px}"
+    },
+    {
+      "name": "Switch",
+      "kind": "input",
+      "refersTo": "switch",
+      "description": "Boolean setting.",
+      "html": "<span class=\"ds-switch\"></span>",
+      "css": ".ds-switch{position:relative;display:inline-block;width:40px;height:24px;border-radius:999px;background:oklch(0.55 0.19 260)}.ds-switch::after{content:'';position:absolute;top:2px;left:18px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 2px oklch(0 0 0/.25)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "A Page of the Dashboard",
+    "overview": "deskport is a single-purpose app that should look like it belongs next to the Cloudflare dashboard, then Vercel and Tailscale: Inter, untinted greys, hairline borders, one blue, and nothing that is there only to look designed. The remote screen and the terminal are the content; every piece of chrome exists to name the machine, show whether it is connected, switch views, or reach a few desktop keys, and then stay out of the way.\n\nDensity is low-to-moderate and calm. Controls are 32px on desktop and grow to 40px on coarse pointers. Depth is a single hairline-plus-soft-shadow vocabulary. There is no illustration, no gradient in the UI, no decorative motion. The one expressive object is the app icon, which lives outside the interface.",
+    "keyCharacteristics": [
+      "Inter Variable throughout the chrome; the terminal has its own selectable monospace.",
+      "Neutral oklch greys with zero chroma for ground, surface and borders.",
+      "One blue (hue 260) for primary action, selection and focus. Green, amber and red appear only as connection state.",
+      "Light and dark follow the system; the user can override with Settings, stored as html[data-theme].",
+      "Radii: 6px small, 8px controls, 12px floating surfaces, 16px for bottom sheets.",
+      "The remote screen sits on a near-black stage in both themes."
+    ],
+    "rules": [
+      {
+        "name": "The One Blue Rule",
+        "body": "Blue marks the thing you can act on or that is selected. It is never decoration, and no second hue is introduced for emphasis.",
+        "section": "colors"
+      },
+      {
+        "name": "The State-Only Rule",
+        "body": "Green, amber and red mean connection state and nothing else. They do not colour buttons, headings or categories.",
+        "section": "colors"
+      },
+      {
+        "name": "The Untinted Grey Rule",
+        "body": "Greys have zero chroma. Warmth or tint would pull the system away from the dashboard reference.",
+        "section": "colors"
+      },
+      {
+        "name": "The Weight-Not-Size Rule",
+        "body": "Distinguish levels with weight and ink colour first; the sizes stay within 11 to 16px.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Float Rule",
+        "body": "Only elements that sit above the remote content use Float. Everything in the normal flow is flat with a hairline.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep chrome neutral grey with 1px hairlines and let the remote screen and terminal be the loudest things on screen.",
+      "Do use Dashboard Blue only for the primary action, selection, toggled state and focus.",
+      "Do use state colours only to show connection state, and always pair them with the text label in the badge.",
+      "Do size touch targets up on coarse pointers (40px icon buttons, 36px by 44px keys, 48px sheet rows).",
+      "Do support both themes through the --* tokens and the html[data-theme] override; define new colours for both.",
+      "Do use inline SVG line icons at 1.75 stroke and keep new controls to the 6, 8, 12px radius set."
+    ],
+    "donts": [
+      "Don't add decorative elements, themed chrome, gradients or illustration to the interface; the gradient belongs to the app icon only.",
+      "Don't tint the greys or introduce a second accent hue.",
+      "Don't use shadows on in-flow surfaces; reserve Float for things above the remote content.",
+      "Don't hide connection state or make it depend on colour alone.",
+      "Don't load fonts or assets from outside the repo; CSP is 'self' only."
+    ]
+  }
+}

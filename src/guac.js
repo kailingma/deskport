@@ -83,6 +83,25 @@ function intParam(value, fallback, min, max) {
  * Bridges a guacamole-common-js WebSocketTunnel to guacd and opens an RDP
  * session to this machine's GNOME desktop sharing.
  */
+// Quality presets, from the settings menu. GNOME desktop sharing ignores colour
+// depth and most RDP experience flags, so the presets differ in frame rate and
+// in whether guacd may compress lossily. Measured on a mostly static 4K desktop:
+// fast ~310 KB/s at ~10 fps, balanced ~380 KB/s at ~16 fps, best 530-650 KB/s.
+const PRESETS = {
+  fast: { minFrameMs: 100, params: {} },
+  balanced: { minFrameMs: 0, params: {} },
+  best: { minFrameMs: 0, params: { 'force-lossless': 'true' } },
+};
+
+const BASE_PARAMS = {
+  'color-depth': '24',
+  'enable-font-smoothing': 'true',
+  'enable-wallpaper': 'true',
+  'enable-theming': 'true',
+  'enable-desktop-composition': 'true',
+  'enable-full-window-drag': 'true',
+};
+
 export function handleScreen(ws, req, { guacd, rdp }, log) {
   const url = new URL(req.url, 'http://localhost');
   const width = intParam(url.searchParams.get('width'), 1280, 320, 7680);
@@ -92,6 +111,9 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
     ? url.searchParams.get('tz')
     : '';
 
+  const quality = Object.hasOwn(PRESETS, url.searchParams.get('quality')) ? url.searchParams.get('quality') : 'balanced';
+  const audio = url.searchParams.get('audio') === '1';
+
   const params = {
     hostname: rdp.hostname,
     port: String(rdp.port),
@@ -99,94 +121,107 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
     password: rdp.password,
     security: 'any',
     'ignore-cert': 'true',
-    'resize-method': 'display-update',
-    'color-depth': '24',
-    'enable-font-smoothing': 'true',
-    'enable-wallpaper': 'true',
-    'enable-theming': 'true',
-    'enable-desktop-composition': 'true',
-    'enable-full-window-drag': 'true',
+    'disable-audio': audio ? 'false' : 'true',
     'server-layout': 'en-us-qwerty',
     timezone,
+    ...BASE_PARAMS,
+    ...PRESETS[quality].params,
   };
+  const { minFrameMs } = PRESETS[quality];
 
-  const socket = net.connect(guacd.port, guacd.host);
-  const decoder = new StringDecoder('utf8');
-  const parser = new GuacParser();
-  let handshakeDone = false;
-  let closed = false;
+  connect();
 
-  const closeAll = (code, reason) => {
-    if (closed) return;
-    closed = true;
-    socket.destroy();
-    if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) ws.close(code, reason);
-  };
+  function connect() {
+    const socket = net.connect(guacd.port, guacd.host);
+    const decoder = new StringDecoder('utf8');
+    const parser = new GuacParser();
+    let handshakeDone = false;
+    let lastSync = 0;
+    let closed = false;
 
-  const sendError = (message, status) => {
-    if (ws.readyState === ws.OPEN) ws.send(encode(['error', message, String(status)]));
-    closeAll(1011, String(status));
-  };
+    const closeAll = (code, reason) => {
+      if (closed) return;
+      closed = true;
+      socket.destroy();
+      if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) ws.close(code, reason);
+    };
 
-  socket.setNoDelay(true);
+    const sendError = (message, status) => {
+      if (ws.readyState === ws.OPEN) ws.send(encode(['error', message, String(status)]));
+      closeAll(1011, String(status));
+    };
 
-  socket.on('connect', () => {
-    socket.write(encode(['select', 'rdp']));
-  });
+    socket.setNoDelay(true);
 
-  socket.on('data', (chunk) => {
-    let instructions;
-    try {
-      instructions = parser.push(decoder.write(chunk));
-    } catch (err) {
-      log(`screen: ${err.message}`);
-      return sendError('Bad data from guacd', STATUS_SERVER_ERROR);
-    }
+    socket.on('connect', () => {
+      socket.write(encode(['select', 'rdp']));
+    });
 
-    if (!handshakeDone) {
-      const argsIdx = instructions.findIndex((i) => i.elements[0] === 'args');
-      if (argsIdx === -1) return;
-      const names = instructions[argsIdx].elements.slice(1);
-      const values = names.map((name) => (name.startsWith('VERSION_') ? name : params[name] ?? ''));
+    socket.on('data', (chunk) => {
+      let instructions;
+      try {
+        instructions = parser.push(decoder.write(chunk));
+      } catch (err) {
+        log(`screen: ${err.message}`);
+        return sendError('Bad data from guacd', STATUS_SERVER_ERROR);
+      }
 
-      socket.write(
-        encode(['size', width, height, dpi]) +
-          encode(['audio', 'audio/L8', 'audio/L16']) +
-          encode(['video']) +
-          encode(['image', 'image/png', 'image/jpeg', 'image/webp']) +
-          (timezone ? encode(['timezone', timezone]) : '') +
-          encode(['connect', ...values]),
-      );
-      handshakeDone = true;
-      log(`screen: connecting RDP ${rdp.hostname}:${rdp.port} at ${width}x${height}`);
+      if (!handshakeDone) {
+        const argsIdx = instructions.findIndex((i) => i.elements[0] === 'args');
+        if (argsIdx === -1) return;
+        const names = instructions[argsIdx].elements.slice(1);
+        const values = names.map((name) => (name.startsWith('VERSION_') ? name : params[name] ?? ''));
 
-      // First message tells the browser tunnel its UUID and marks it open.
-      ws.send(encode(['', randomUUID()]));
-      instructions = instructions.slice(argsIdx + 1);
-    }
+        socket.write(
+          encode(['size', width, height, dpi]) +
+            encode(['audio', ...(audio ? ['audio/L8', 'audio/L16'] : [])]) +
+            encode(['video']) +
+            encode(['image', 'image/png', 'image/jpeg', 'image/webp']) +
+            (timezone ? encode(['timezone', timezone]) : '') +
+            encode(['connect', ...values]),
+        );
+        handshakeDone = true;
+        log(`screen: connecting RDP ${rdp.hostname}:${rdp.port} (${quality}, browser ${width}x${height})`);
 
-    if (instructions.length && ws.readyState === ws.OPEN) {
-      ws.send(instructions.map((i) => i.raw).join(''));
-    }
-  });
+        // First message tells the browser tunnel its UUID and marks it open.
+        ws.send(encode(['', randomUUID()]));
+        instructions = instructions.slice(argsIdx + 1);
+      }
 
-  socket.on('error', (err) => {
-    log(`screen: guacd ${guacd.host}:${guacd.port} error: ${err.code || err.message}`);
-    sendError(`guacd is not reachable at ${guacd.host}:${guacd.port}`, STATUS_UPSTREAM_NOT_FOUND);
-  });
+      if (instructions.length && ws.readyState === ws.OPEN) {
+        ws.send(instructions.map((i) => i.raw).join(''));
+      }
+    });
 
-  socket.on('close', () => closeAll(1000, ''));
+    socket.on('error', (err) => {
+      log(`screen: guacd ${guacd.host}:${guacd.port} error: ${err.code || err.message}`);
+      sendError(`guacd is not reachable at ${guacd.host}:${guacd.port}`, STATUS_UPSTREAM_NOT_FOUND);
+    });
 
-  ws.on('message', (raw) => {
-    const msg = raw.toString();
-    // Internal tunnel instructions start with an empty opcode ("0.").
-    // The browser sends "ping" this way and expects it echoed back.
-    if (msg.startsWith('0.,')) {
-      if (msg.startsWith('0.,4.ping,') && ws.readyState === ws.OPEN) ws.send(msg);
-      return;
-    }
-    if (handshakeDone && !socket.destroyed) socket.write(msg);
-  });
+    socket.on('close', () => closeAll(1000, ''));
 
-  ws.on('close', () => closeAll(1000, ''));
+    ws.on('message', (raw) => {
+      const msg = raw.toString();
+      // Internal tunnel instructions start with an empty opcode ("0.").
+      // The browser sends "ping" this way and expects it echoed back.
+      if (msg.startsWith('0.,')) {
+        if (msg.startsWith('0.,4.ping,') && ws.readyState === ws.OPEN) ws.send(msg);
+        return;
+      }
+      if (!handshakeDone || socket.destroyed) return;
+      // guacd sends the next frame only after the browser acknowledges the last
+      // one, so holding acknowledgements back caps the frame rate.
+      if (minFrameMs && msg.startsWith('4.sync,')) {
+        const wait = Math.max(0, lastSync + minFrameMs - Date.now());
+        lastSync = Date.now() + wait;
+        if (wait) {
+          setTimeout(() => { if (!socket.destroyed) socket.write(msg); }, wait);
+          return;
+        }
+      }
+      socket.write(msg);
+    });
+
+    ws.on('close', () => closeAll(1000, ''));
+  }
 }

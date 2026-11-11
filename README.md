@@ -23,15 +23,51 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
 | Screen / Terminal (Alt+1 / Alt+2) | Switch views. Both stay connected in the background. |
 | Clipboard button | Sends your local clipboard to the remote desktop; paste there with Ctrl+V. Copying on the remote desktop fills your local clipboard. |
 | Grid button | Presses Super (opens Activities). |
+| Sliders button | Opens settings. |
 | Ctrl+Alt+Del | Sends Ctrl+Alt+Delete. |
 | Full screen button | Hides the browser chrome. The top bar becomes a floating toolbar that slides away after a few seconds; move the pointer to the top edge or click the handle to bring it back. In Chrome, full screen also passes Esc, Super and Alt+Tab to the remote desktop. |
 
 ### iPhone
 
-- **Bottom tab bar**: Screen, Terminal, and More. More opens a sheet with Show keyboard, Send clipboard, Press Super, Send Ctrl+Alt+Delete and Reconnect.
+- **Bottom tab bar**: Screen, Terminal, and More. More opens a sheet with Show keyboard, Send clipboard, Press Super, Send Ctrl+Alt+Delete, Reconnect and Settings.
 - **Key row**: Esc, Tab, Ctrl, Alt, the arrow keys, and `/ - | ~`. It appears above the on-screen keyboard, and always in the Terminal view. Ctrl and Alt stay on for the next key you press, so Ctrl then `c` sends Ctrl+C.
-- **Touch on the Screen view**: tap to click, and press and drag to drag. Two fingers moved up or down scroll the remote desktop. Pinch to zoom in. While zoomed in, dragging with two fingers pans the view.
+- **Touch on the Screen view**:
+
+  | Gesture | Does |
+  | --- | --- |
+  | Tap | Left click |
+  | Drag | Scrolls the remote desktop, with momentum |
+  | Long press, then drag | Drags with the left button held (move windows, select text) |
+  | Long press, then release | Right click |
+  | Two-finger tap | Right click |
+  | Pinch, or drag with two fingers | Zooms and pans this view |
+
+- **Touch in the Terminal view**: drag to scroll (tmux scrollback when tmux has the mouse, which it does with `set -g mouse on`), long press then drag to select. tmux copies the selection to its buffer when you lift your finger.
 - **Full screen**: iPhone Safari has no full-screen mode for web pages. Use Share, then Add to Home Screen, to get deskport without Safari's toolbars.
+
+### Settings
+
+The sliders button in the top bar (or More, then Settings, on a phone) opens the settings. They are saved in the browser, so each device keeps its own.
+
+| Setting | Options |
+| --- | --- |
+| Theme | System, Light, Dark |
+| Picture quality | Faster (about 10 frames per second), Balanced, Sharper (lossless). Applies when you close settings; the screen reconnects. |
+| Touch scrolling | Natural or reversed direction |
+| Terminal colours | deskport dark and light, Solarized dark and light, Nord, Gruvbox dark |
+| Terminal font and size | System monospace, JetBrains Mono, IBM Plex Mono; 9 to 22 px |
+| Cursor | Block, bar or underline; blinking on or off |
+| Extra key row | Auto (on phones in the terminal and when a keyboard is up), always, never |
+
+### Speed
+
+GNOME desktop sharing in mirror mode always sends the monitor at its native resolution; it ignores the size the browser asks for. On a 4K monitor that is the main cost. What deskport does about it:
+
+- Screen messages are compressed (permessage-deflate), which cut traffic by about a quarter in testing.
+- The quality presets trade frame rate and lossless output for data. Measured on a mostly static 4K desktop: Faster about 310 KB/s at 10 fps, Balanced about 380 KB/s at 16 fps, Sharper 530 to 650 KB/s.
+- Audio is not requested (GNOME's RDP audio channel does not work with guacd).
+
+Lowering the monitor's own resolution during a session would cut traffic much further, but changing monitor modes broke the display on a machine with one monitor connected to two GPUs, so deskport does not do it. `node scripts/measure-screen.mjs [seconds] [ws://host:port]` measures the presets against a dev server.
 
 ### Connection states
 
@@ -64,7 +100,8 @@ Configuration lives outside the repo in `~/.config/deskport/` (see [deskport.env
 npm run dev      # watch mode, Access checks off, loopback only
 npm test         # protocol parser tests
 npm run check    # syntax check of every source file
-node scripts/make-icons.mjs   # regenerate public/icons/*.png
+node scripts/make-icons.mjs   # regenerate public/icons/*.png from the icon geometry
+node scripts/measure-screen.mjs 15 ws://127.0.0.1:7900   # bandwidth per quality preset
 ```
 
 There is no build step. The page is plain ES modules; browser libraries (guacamole-common-js, xterm.js, Inter) are served from `node_modules` under `/vendor/`.

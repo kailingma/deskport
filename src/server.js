@@ -49,6 +49,7 @@ app.get('/api/me', (req, res) => {
   res.json({ email: req.user.email, host: os.hostname(), dev: Boolean(req.user.dev) });
 });
 
+
 const vendor = {
   '/vendor/guacamole-common.js': 'node_modules/guacamole-common-js/dist/esm/guacamole-common.min.js',
   '/vendor/xterm.mjs': 'node_modules/@xterm/xterm/lib/xterm.mjs',
@@ -56,6 +57,9 @@ const vendor = {
   '/vendor/addon-fit.mjs': 'node_modules/@xterm/addon-fit/lib/addon-fit.mjs',
   '/vendor/addon-web-links.mjs': 'node_modules/@xterm/addon-web-links/lib/addon-web-links.mjs',
   '/vendor/inter.woff2': 'node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2',
+  '/vendor/jetbrains-mono.woff2': 'node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2',
+  '/vendor/ibm-plex-mono-400.woff2': 'node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2',
+  '/vendor/ibm-plex-mono-600.woff2': 'node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2',
 };
 for (const [route, file] of Object.entries(vendor)) {
   app.get(route, (req, res) => res.sendFile(path.join(root, file), { maxAge: '1d' }));
@@ -71,6 +75,8 @@ app.use((err, req, res, _next) => {
 const server = http.createServer(app);
 const screenWss = new WebSocketServer({
   noServer: true,
+  // Screen updates are base64 images; fast deflate wins back most of the base64 overhead.
+  perMessageDeflate: { threshold: 1024, zlibDeflateOptions: { level: 1 }, serverNoContextTakeover: true, clientNoContextTakeover: true },
   handleProtocols: (protocols) => (protocols.has('guacamole') ? 'guacamole' : false),
 });
 const termWss = new WebSocketServer({ noServer: true });

@@ -15,6 +15,7 @@
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
   <link rel="preload" href="/vendor/inter.woff2" as="font" type="font/woff2" crossorigin>
+  <script src="/theme-init.js"></script>
   <link rel="stylesheet" href="/vendor/xterm.css">
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -30,6 +31,9 @@
     <symbol id="i-more" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6M20.5 3.5v5h-5"/></symbol>
     <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8M7 6.3a7.5 7.5 0 1 0 10 0"/></symbol>
+    <symbol id="i-mark" viewBox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="12.5" width="14.5" height="12" rx="3"/><path d="M23 6.5v18"/></g><rect x="12" y="16" width="3.2" height="5" rx="0.8" fill="currentColor"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
     <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
@@ -38,7 +42,7 @@
 
   <header class="bar" id="bar">
     <div class="bar-start">
-      <span class="mark" aria-hidden="true"><svg><use href="#i-monitor"/></svg></span>
+      <span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#i-mark"/></svg></span>
       <span class="name">deskport</span>
       <span class="host" id="host"></span>
     </div>
@@ -63,7 +67,10 @@
         </button>
         <button class="btn-text" data-action="cad" title="Send Ctrl+Alt+Delete">Ctrl+Alt+Del</button>
       </div>
-      <span class="divider fs-only-supported" aria-hidden="true"></span>
+      <span class="divider" aria-hidden="true"></span>
+      <button class="btn-icon" data-action="settings" title="Settings" aria-label="Settings">
+        <svg class="icon"><use href="#i-sliders"/></svg>
+      </button>
       <button class="btn-icon fs-only-supported" data-action="fullscreen" title="Full screen" aria-label="Full screen">
         <svg class="icon"><use href="#i-maximize" id="fs-icon"/></svg>
       </button>
@@ -74,6 +81,7 @@
   <main>
     <section class="view" id="view-screen" role="tabpanel">
       <div class="display-wrap" id="display-wrap"></div>
+      <div class="touch-ring" id="touch-ring" aria-hidden="true" hidden></div>
       <div class="overlay" id="screen-overlay" hidden>
         <div class="dialog-card" role="alertdialog" aria-labelledby="screen-overlay-title" aria-describedby="screen-overlay-body">
           <h2 class="dialog-title" id="screen-overlay-title">Disconnected</h2>
@@ -125,9 +133,93 @@
       <button class="sheet-item screen-only" data-action="super"><svg class="icon"><use href="#i-grid"/></svg>Press Super</button>
       <button class="sheet-item screen-only" data-action="cad"><svg class="icon"><use href="#i-power"/></svg>Send Ctrl+Alt+Delete</button>
       <button class="sheet-item" data-action="reconnect"><svg class="icon"><use href="#i-refresh"/></svg>Reconnect</button>
+      <button class="sheet-item" data-action="settings"><svg class="icon"><use href="#i-sliders"/></svg>Settings</button>
       <button class="sheet-item fs-only-supported" data-action="fullscreen"><svg class="icon"><use href="#i-maximize"/></svg>Full screen</button>
     </div>
     <button class="sheet-cancel" data-action="close-sheet">Cancel</button>
+  </dialog>
+
+  <dialog class="settings" id="settings" aria-labelledby="settings-title">
+    <header class="settings-head">
+      <h2 id="settings-title">Settings</h2>
+      <button class="btn-icon" data-action="close-settings" aria-label="Close settings"><svg class="icon"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="settings-body">
+      <section class="settings-group" aria-labelledby="sg-appearance">
+        <h3 id="sg-appearance">Appearance</h3>
+        <div class="field">
+          <span class="field-label" id="lbl-theme">Theme</span>
+          <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-theme" data-setting="theme">
+            <button type="button" role="radio" data-value="system">System</button>
+            <button type="button" role="radio" data-value="light">Light</button>
+            <button type="button" role="radio" data-value="dark">Dark</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-group" aria-labelledby="sg-screen">
+        <h3 id="sg-screen">Screen</h3>
+        <div class="field field-stack">
+          <label class="field-label" for="set-quality">Picture quality</label>
+          <input type="range" id="set-quality" min="0" max="2" step="1" data-setting="quality" aria-describedby="quality-help">
+          <div class="range-labels" aria-hidden="true"><span>Faster</span><span>Balanced</span><span>Sharper</span></div>
+          <p class="field-help" id="quality-help"></p>
+        </div>
+        <div class="field">
+          <span class="field-label" id="lbl-scroll">Touch scrolling</span>
+          <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-scroll" data-setting="touchScroll">
+            <button type="button" role="radio" data-value="natural">Natural</button>
+            <button type="button" role="radio" data-value="reversed">Reversed</button>
+          </div>
+        </div>
+        <p class="field-note">Picture quality applies when you close settings; the screen reconnects.</p>
+      </section>
+
+      <section class="settings-group" aria-labelledby="sg-term">
+        <h3 id="sg-term">Terminal</h3>
+        <div class="field">
+          <label class="field-label" for="set-term-theme">Colours</label>
+          <select class="select" id="set-term-theme" data-setting="termTheme"></select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="set-term-font">Font</label>
+          <select class="select" id="set-term-font" data-setting="termFont"></select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="set-term-size">Font size</label>
+          <div class="range-inline">
+            <input type="range" id="set-term-size" min="9" max="22" step="1" data-setting="termFontSize">
+            <output id="term-size-value" for="set-term-size"></output>
+          </div>
+        </div>
+        <div class="field">
+          <span class="field-label" id="lbl-cursor">Cursor</span>
+          <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-cursor" data-setting="cursorStyle">
+            <button type="button" role="radio" data-value="block">Block</button>
+            <button type="button" role="radio" data-value="bar">Bar</button>
+            <button type="button" role="radio" data-value="underline">Underline</button>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="set-blink">Blinking cursor</label>
+          <input type="checkbox" class="switch" id="set-blink" role="switch" data-setting="cursorBlink">
+        </div>
+      </section>
+
+      <section class="settings-group" aria-labelledby="sg-touch">
+        <h3 id="sg-touch">Touch</h3>
+        <div class="field">
+          <span class="field-label" id="lbl-keyrow">Extra key row</span>
+          <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-keyrow" data-setting="keyRow">
+            <button type="button" role="radio" data-value="auto">Auto</button>
+            <button type="button" role="radio" data-value="always">Always</button>
+            <button type="button" role="radio" data-value="never">Never</button>
+          </div>
+        </div>
+      </section>
+
+      <p class="settings-foot" id="settings-who"></p>
+    </div>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

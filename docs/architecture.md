@@ -17,8 +17,12 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | `src/server.js` | Express app, security headers, `/api/me`, `/vendor/*` routes, static files, and the WebSocket upgrade router. |
 | `src/guac.js` | Guacamole protocol encoder and parser, and the bridge between a browser WebSocket and a guacd TCP connection. |
 | `src/terminal.js` | Attaches a WebSocket to tmux through a pseudo-terminal. |
-| `public/` | The page: `index.html`, `style.css`, `app.js`, fonts and icons. No build step. |
-| `scripts/` | `setup-rdp.sh` and `install-services.sh`. |
+| `public/app.js` | Entry point: views, full screen and the floating toolbar, settings dialog, key row, viewport handling. |
+| `public/js/screen.js` | Screen view: Guacamole client, scaling and zoom, touch gestures, soft keyboard. |
+| `public/js/terminal.js` | Terminal view: xterm.js, reconnects, touch scrolling and selection, appearance settings. |
+| `public/js/settings.js`, `themes.js`, `keys.js`, `gestures.js` | Per-device settings store, terminal colour schemes and fonts, key codes and sticky modifiers, scroll momentum. |
+| `public/` (rest) | `index.html`, `style.css`, `theme-init.js` (applies a saved light/dark choice before first paint), icons, manifest. No build step. |
+| `scripts/` | `setup-rdp.sh`, `install-services.sh`, `make-icons.mjs`, `measure-screen.mjs`. |
 | `deploy/` | guacd compose file and the cloudflared config example. |
 | `test/` | `node --test` tests for the protocol parser. |
 
@@ -45,13 +49,20 @@ The browser runs `guacamole-common-js`. Its `WebSocketTunnel` connects to `/ws/s
 `handleScreen()` opens a TCP connection to guacd and runs the handshake itself:
 
 1. Sends `select rdp`.
-2. On guacd's `args` reply, answers each requested argument from the config: host, port, username, password, `security=any`, `ignore-cert=true`, `resize-method=display-update`, 24-bit colour, and the desktop-experience options (wallpaper, theming, font smoothing, full-window drag, composition).
+2. On guacd's `args` reply, answers each requested argument from the config: host, port, username, password, `security=any`, `ignore-cert=true`, `disable-audio=true`, 24-bit colour, the desktop-experience options (wallpaper, theming, font smoothing, full-window drag, composition), and the quality preset below.
 3. Sends `size`, `audio`, `video`, `image`, `timezone`, then `connect`, echoing guacd's protocol version.
 4. Sends the browser the tunnel's UUID instruction (`0.,36.<uuid>;`), which `WebSocketTunnel` expects first.
 
 From then on it forwards complete instructions both ways. Guacamole element lengths count Unicode code points, so `GuacParser` handles surrogate pairs and instructions split across TCP chunks; `WebSocketTunnel` requires whole instructions per frame. Internal `ping` instructions from the browser are answered directly, other internal instructions are dropped.
 
-`resize-method=display-update` lets the browser ask GNOME to change its resolution to fit the window. The credentials never reach the browser.
+The browser passes a quality preset (`fast`, `balanced`, `best`) in the query string. GNOME ignores colour depth and most RDP experience flags, so the presets differ in two ways:
+
+- `best` sets `force-lossless`, so guacd never sends JPEG or lossy WebP.
+- `fast` caps the frame rate at about 10 fps. guacd sends the next frame only after the browser acknowledges the previous one with a `sync` instruction, so the bridge holds those acknowledgements back until 100 ms have passed since the last one it forwarded.
+
+Audio is not requested. The screen WebSocket uses permessage-deflate at zlib level 1: the images travel as base64, and compression wins back most of that overhead. The credentials never reach the browser.
+
+GNOME's mirror mode always streams the monitor at its native size. An earlier version switched the physical monitor to a lower mode during sessions; on a monitor connected to two GPUs that left one output unable to draw until the user logged out, so that code was removed.
 
 ## Terminal
 
