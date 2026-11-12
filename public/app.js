@@ -169,7 +169,53 @@ const PRIORITY_HELP = {
   speed: 'Sends every frame as soon as it is ready.',
   data: 'Sends at most 10 frames a second.',
 };
-const SCREEN_SETTINGS = ['source', 'resolution', 'quality', 'priority', 'matchMonitor', 'monitor'];
+// With a video encoding the slider sets the encoder's quantizer range, not an image format.
+const VIDEO_QUALITY_HELP = {
+  low: 'Blurry text, and the least data, also while the screen is still.',
+  medium: 'Readable text.',
+  high: 'Sharp text once the picture stops changing.',
+  lossless: 'The sharpest the video encoder allows, at the most data. Not exact pixels.',
+};
+const VIDEO_PRIORITY_HELP = {
+  speed: ['Up to 30 frames a second.', 'Adapt keeps the delay as low as the connection allows.'],
+  data: ['Up to 10 frames a second.', 'Adapt uses at most half the bitrate and raises it slowly.'],
+};
+const ENCODING_HELP = {
+  images: 'Changed areas are sent as pictures. Works in every browser.',
+  av1: 'A video stream, encoded on the computer\'s processor. Moving content uses much less data than images.',
+  h264: 'A video stream, encoded on the computer\'s graphics card, which leaves the processor free. More devices decode it than AV1.',
+};
+// Measured on this computer's encoders, per 1920 x 1080 frame.
+const SPEED_HELP = {
+  av1: ['About 13 ms to encode a frame.', 'About 15 ms to encode a frame, searching longer for a smaller encoding.', 'About 19 ms to encode a frame, the encoder\'s most thorough setting here.'],
+  h264: ['About 2 ms to encode a frame.', 'About 3 ms to encode a frame, searching longer for a smaller encoding.', 'About 5 ms to encode a frame, the encoder\'s most thorough setting here.'],
+};
+const SCREEN_SETTINGS = ['source', 'resolution', 'quality', 'priority', 'matchMonitor', 'monitor', 'encoding', 'encSpeed', 'bitrate'];
+let decodes = null;
+screen.videoSupport().then((s) => {
+  decodes = s;
+  if (settingsDialog.open) syncSettingsForm();
+});
+
+function bitrateHelp(bitrate, priority) {
+  if (bitrate === 'auto') {
+    return priority === 'data'
+      ? 'Starts low and raises the bitrate slowly while frames arrive on time. Lowers it when they start to queue.'
+      : 'Raises the bitrate while frames arrive on time and lowers it as soon as they start to queue.';
+  }
+  return `Always ${Number(bitrate) / 1000} Mbit/s. When the connection cannot carry it, frames are skipped instead of queued.`;
+}
+
+/** One line about the video stream being received, or ''. */
+function videoStatsLine() {
+  const { encoding, stats } = screen.videoInfo();
+  if (encoding === 'images' || !stats) return '';
+  const mbit = (kbps) => (kbps / 1000).toFixed(kbps < 10000 ? 1 : 0);
+  const parts = [`Now ${mbit(stats.sentKbps)} Mbit/s at ${stats.fps} frames a second`];
+  if (settings.get('bitrate') === 'auto') parts.push(`target ${mbit(stats.kbps)} Mbit/s`);
+  if (stats.rttMs !== null) parts.push(`${stats.rttMs} ms round trip`);
+  return `${parts.join(', ')}.`;
+}
 const KB_HELP = {
   resize: 'The screen shrinks to fit above the keyboard. A separate desktop or extra monitor is resized to match.',
   keep: 'The keyboard covers the bottom of the screen and nothing is resized. Drag with one finger to see what is under it.',
@@ -212,9 +258,26 @@ function syncSettingsForm() {
   $('resolution-help').textContent = source !== 'mirror' || matched
     ? 'Always matches this window.'
     : size ? `Receiving ${size[0]} × ${size[1]} pixels.` : '';
+  const encoding = settings.get('encoding');
+  const isVideo = encoding !== 'images';
+  $('set-encoding').value = encoding;
+  const name = encoding === 'av1' ? 'AV1' : 'H.264';
+  $('encoding-help').textContent = ENCODING_HELP[encoding]
+    + (!isVideo || !decodes ? '' : decodes[encoding] ? ` This browser can decode ${name}.` : ` This browser cannot decode ${name}, so images are sent instead.`);
+  $('video-rows').hidden = !isVideo;
+  if (isVideo) {
+    $('set-enc-speed').value = String(settings.get('encSpeed'));
+    $('enc-speed-help').textContent = SPEED_HELP[encoding][settings.get('encSpeed')];
+    $('set-bitrate').value = settings.get('bitrate');
+    $('bitrate-help').textContent = bitrateHelp(settings.get('bitrate'), settings.get('priority'));
+    $('video-stats').textContent = videoStatsLine();
+    $('video-stats').hidden = !$('video-stats').textContent;
+  }
   $('set-quality').value = String(QUALITY.indexOf(settings.get('quality')));
-  $('quality-help').textContent = QUALITY_HELP[settings.get('quality')];
-  $('priority-help').textContent = PRIORITY_HELP[settings.get('priority')];
+  $('quality-help').textContent = (isVideo ? VIDEO_QUALITY_HELP : QUALITY_HELP)[settings.get('quality')];
+  const [fps, adapt] = VIDEO_PRIORITY_HELP[settings.get('priority')];
+  $('priority-help').textContent = !isVideo ? PRIORITY_HELP[settings.get('priority')]
+    : settings.get('bitrate') === 'auto' ? `${fps} ${adapt}` : fps;
   $('set-term-theme').value = settings.get('termTheme');
   $('set-term-font').value = settings.get('termFont');
   $('set-term-size').value = String(settings.get('termFontSize'));
@@ -260,6 +323,7 @@ settingsDialog.addEventListener('input', async (e) => {
     return;
   }
   if (t.id === 'set-quality') settings.set('quality', QUALITY[Number(t.value)]);
+  else if (t.id === 'set-enc-speed') settings.set('encSpeed', Number(t.value));
   else if (t.id === 'set-term-size') settings.set('termFontSize', Number(t.value));
   else if (t.id === 'set-blink') settings.set('cursorBlink', t.checked);
   else if (t.dataset.setting) settings.set(t.dataset.setting, t.value);
@@ -308,6 +372,13 @@ function openSettings() {
   refreshSession();
   refreshMonitors();
   settingsDialog.showModal();
+  // The video stream's numbers change while the dialog is open.
+  const statsTimer = setInterval(() => {
+    const line = videoStatsLine();
+    $('video-stats').textContent = line;
+    $('video-stats').hidden = !line;
+  }, 1000);
+  settingsDialog.addEventListener('close', () => clearInterval(statsTimer), { once: true });
 }
 
 // ---------- the separate desktop ----------

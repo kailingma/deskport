@@ -58,8 +58,11 @@ The sliders button in the top bar (or More, then Settings, on a phone) opens the
 | Theme | System, Light, Dark |
 | Show | My monitor (default), Extra monitor, Separate desktop (see below) |
 | Resolution | Auto (fits this screen, with room to pinch-zoom 2x on touch screens), Full size, 75%, 50%, 33%. Only for My monitor; the other two are always made at this device's size. |
-| Picture quality | Low, Medium, High, Lossless |
-| Prioritize | Responsiveness (every frame) or Data use (about 10 frames per second) |
+| Send as | Images (as before), AV1 video or H.264 video. See [Video](#video). |
+| Encoder speed | Video only: Fastest, Balanced, Smallest |
+| Bitrate | Video only: Adapt to the connection, or a fixed 0.5 to 20 Mbit/s |
+| Picture quality | Low, Medium, High, Lossless. With video, the encoder's quality range instead. |
+| Prioritize | Responsiveness (every frame) or Data use (about 10 frames per second). With video: up to 30 or 10 frames a second, and what Adapt aims for. |
 | Touch scrolling | Natural or reversed direction |
 | Terminal colours | deskport dark and light, Solarized dark and light, Nord, Gruvbox dark |
 | Terminal font and size | System monospace, JetBrains Mono, IBM Plex Mono; 9 to 22 px |
@@ -110,6 +113,18 @@ Time from a key press to the first screen update reaching the browser, measured 
 
 Before the fix described under Prioritize, Data use had a 90th percentile of 1.5 s and 5 of 24 keys showed no update within 3 s. `node scripts/measure-typing.mjs [ws://host:port] [query ...]` repeats this; it types only into the separate desktop.
 
+### Video
+
+Send as AV1 video or H.264 video sends the screen as a video stream instead of images. The Guacamole connection stays up for the keyboard, mouse, pointer and clipboard; the picture comes from GNOME's screen recording interface (the same one desktop sharing uses), is encoded on the computer, and travels on a second WebSocket. GNOME shows its screen recording indicator in the top bar while it runs. Nothing about the monitor changes.
+
+- **AV1** is encoded on the processor (libaom, realtime mode). It needs a browser that decodes AV1: Chrome, Edge and Firefox on computers do; Safari only on devices with an AV1 decoder in hardware (iPhone 15 Pro and later, Macs and iPads with an M3 or later). Elsewhere deskport says so and sends images.
+- **H.264** is encoded on the graphics card (NVENC), so it barely uses the processor, and most browsers decode it, including Safari on iPhone.
+- **Encoder speed**: time to encode one 1920 × 1080 frame on this computer. AV1: 13, 15 and 19 ms; at 3840 × 2160 39, 42 and 56 ms. H.264: 2, 3 and 5 ms; 8 to 21 ms at 3840 × 2160.
+- **Bitrate, Adapt**: the browser acknowledges each decoded frame. While frames come back as fast as the connection's base round trip, the bitrate rises (8% every quarter second at Responsiveness, 4% at Data use, which also stops at half the ceiling); as soon as they start to queue it drops to below what the connection delivered. A fixed bitrate does not change.
+- With either bitrate, a new frame is encoded only while the frames already sent are arriving on time. Otherwise the newest captured frame waits and the ones before it are skipped, so a slow connection shows fewer frames instead of an older picture.
+
+On the separate desktop, opening and closing the Activities overview every 350 ms for 10 seconds at 1280 × 720 sent 7.2 MB as images at High (base64 text before compression), 660 KB as AV1 at High, 265 KB as AV1 at Medium and 347 KB as H.264 at High. Through a simulated 1.5 Mbit/s connection with a 150 ms round trip, Adapt settled at 0.9 to 1.3 Mbit/s over three runs, and frames were acknowledged a median 172 to 298 ms after they were sent (at most 631 to 777 ms).
+
 ### Connection states
 
 The badge in the top bar shows the current view's connection state: Connecting, Connected, Reconnecting (the terminal retries with backoff), Disconnected, or Error. If the screen connects but no picture arrives within 12 seconds, deskport says so and tells you how to restart GNOME desktop sharing.
@@ -155,5 +170,6 @@ There is no build step. The page is plain ES modules; browser libraries (guacamo
 
 - The desktop must have a logged-in GNOME session. A locked screen shows the lock screen, which you can unlock remotely.
 - My monitor shares the primary monitor only, at its own resolution, scaled to fit your window.
+- The video encodings need GStreamer with its Python bindings (`python3-gi`, `gir1.2-gstreamer-1.0`), the `aom`, `pipewire` and `videoparsersbad` plugins (gstreamer1.0-plugins-good and -bad), and for H.264 an NVIDIA graphics card with NVENC (`nvcodec`, in gstreamer1.0-plugins-bad).
 - GNOME desktop sharing listens on all interfaces on its port. Firewall it if the machine is on an untrusted network.
 - `node-pty` is a native module. After changing Node major versions, run `npm rebuild node-pty` and `./scripts/install-services.sh`.

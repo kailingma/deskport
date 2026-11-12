@@ -14,6 +14,7 @@ import { createApi } from './api.js';
 import { createMonitors } from './monitors.js';
 import { createUi } from './ui.js';
 import { createOpener } from './opener.js';
+import { createVideoHub } from './video.js';
 
 // Starts one deskport host: authentication and security headers, the API, the
 // web page (unless DESKPORT_UI=0), and the screen and terminal WebSockets.
@@ -41,8 +42,9 @@ const session = createSessionControl({
   log,
 });
 // The desktop on the monitor is this user's main session bus.
+const mainBus = process.env.DBUS_SESSION_BUS_ADDRESS || `unix:path=/run/user/${process.getuid()}/bus`;
 const monitors = createMonitors({
-  bus: process.env.DBUS_SESSION_BUS_ADDRESS || `unix:path=/run/user/${process.getuid()}/bus`,
+  bus: mainBus,
   id: String(config.port),
   log,
 });
@@ -53,6 +55,7 @@ const opener = createOpener({
   log,
 });
 const terminal = { ...config.terminal, binDir: path.join(root, 'bin'), opener };
+const video = createVideoHub({ log });
 
 // ---------- HTTP ----------
 
@@ -112,8 +115,11 @@ const termWss = new WebSocketServer({
   noServer: true,
   perMessageDeflate: { threshold: 64, zlibDeflateOptions: { level: 6, memLevel: 8 } },
 });
+// Video frames (video.js) are already compressed.
+const videoWss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
 const endpoints = {
-  '/ws/screen': { wss: screenWss, open: (ws, req) => handleScreen(ws, req, { ...config, session, monitors }, log) },
+  '/ws/screen': { wss: screenWss, open: (ws, req) => handleScreen(ws, req, { ...config, session, monitors, video, mainBus }, log) },
+  '/ws/video': { wss: videoWss, open: (ws, req) => video.open(ws, req) },
   '/ws/term': { wss: termWss, open: (ws, req) => handleTerminal(ws, req, terminal, log) },
 };
 
@@ -157,7 +163,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     log(`${sig}, shutting down`);
     server.close();
     opener.close();
-    for (const c of [...screenWss.clients, ...termWss.clients]) c.terminate();
+    for (const c of [...screenWss.clients, ...videoWss.clients, ...termWss.clients]) c.terminate();
     setTimeout(() => process.exit(0), 500).unref();
   });
 }

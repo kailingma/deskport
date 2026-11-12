@@ -45,6 +45,8 @@ export function createSessionControl({ unit, host, port, log }) {
 
   return {
     state,
+    /** D-Bus address of the separate desktop's private session bus. */
+    bus: sessionBus,
 
     /** Starts the session if needed and resolves once its RDP port accepts connections. */
     async ensureRunning() {

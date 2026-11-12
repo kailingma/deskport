@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createScaler } from './scaler.js';
 import { createAckAhead, lastSyncTimestamp } from './pacing.js';
+import { createDrawFilter, createVideoSource, ENCODINGS, BITRATES } from './video.js';
 
 // Guacamole protocol: each element is "<length>.<value>", elements are
 // separated by "," and an instruction ends with ";". Lengths count Unicode
@@ -99,6 +100,10 @@ function intParam(value, fallback, min, max) {
 //             guacd sends about 10 frames per second.
 //   res       auto | 1 | 0.75 | 0.5 | 0.33. Below 1, scaler.js shrinks the picture;
 //             auto picks the scale that fills the browser's device pixels.
+//   encoding  images (guacd's pictures, as above) | av1 | h264. The video
+//             encodings send the picture as a video stream instead (video.js),
+//             at encoder speed `speed` (0 fastest .. 2 smallest) and `bitrate`
+//             (auto adapts to the link, or a fixed kbit/s).
 const QUALITIES = new Set(['low', 'medium', 'high', 'lossless']);
 const SCALES = new Set(['1', '0.75', '0.5', '0.33']);
 const DATA_SAVER_FRAME_MS = 100;
@@ -205,7 +210,9 @@ const BASE_PARAMS = {
   'enable-full-window-drag': 'true',
 };
 
-export function handleScreen(ws, req, { guacd, rdp, session, monitors }, log) {
+const VIDEO_SELF_ACK_MS = 250;
+
+export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, mainBus }, log) {
   const url = new URL(req.url, 'http://localhost');
   const width = intParam(url.searchParams.get('width'), 1280, 320, 7680);
   const height = intParam(url.searchParams.get('height'), 720, 240, 4320);
@@ -219,7 +226,13 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors }, log) {
   const priority = q.get('priority') === 'data' ? 'data' : 'speed';
   const res = q.get('res') === 'auto' || SCALES.has(q.get('res')) ? q.get('res') : '1';
   const audio = q.get('audio') === '1';
-  const minFrameMs = priority === 'data' ? DATA_SAVER_FRAME_MS : 0;
+  const encoding = ENCODINGS.includes(q.get('encoding')) && video ? q.get('encoding') : 'images';
+  const videoMode = encoding !== 'images';
+  const speed = intParam(q.get('speed'), 0, 0, 2);
+  const bitrate = BITRATES.includes(q.get('bitrate')) ? q.get('bitrate') : 'auto';
+  // With a video encoding the browser's own acknowledgements are not used:
+  // guacd's pictures are dropped, so the bridge acknowledges its frames itself.
+  const minFrameMs = videoMode ? 0 : priority === 'data' ? DATA_SAVER_FRAME_MS : 0;
   const source = SOURCES.has(q.get('source')) ? q.get('source') : 'mirror';
   // My monitor only: "match" changes the monitor's mode to fit this browser
   // while it is connected; "monitor" names the monitor to show (monitors.js).
@@ -283,12 +296,34 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors }, log) {
     let lastSync = 0;
     let heldSync = null;
     // At Responsiveness, frames are acknowledged to guacd as they leave (pacing.js).
-    const pacer = minFrameMs || !ACK_AHEAD ? null : createAckAhead({
+    const pacer = videoMode || minFrameMs || !ACK_AHEAD ? null : createAckAhead({
       max: ACK_AHEAD,
       ack: (ts) => { if (!socket.destroyed) socket.write(encode(['sync', ts])); },
     });
+    // Video encodings: guacd's drawing on the visible picture is dropped, and
+    // a video stream of the same monitor replaces it at the size the browser
+    // receives (after the scaler).
+    const drawFilter = videoMode ? createDrawFilter() : null;
+    const videoSource = videoMode ? createVideoSource({
+      bus: source === 'session' ? session.bus : mainBus,
+      monitor: source === 'mirror' ? monitor : 'virtual',
+      codec: encoding, speed, quality, priority, bitrate, log,
+    }) : null;
+    let desktopSize = null;
+    let uuid = null;
+    let selfAck = null; // newest sync from guacd not yet acknowledged
+    let selfAckTimer = null;
+    const ackGuacd = () => {
+      selfAckTimer = null;
+      if (selfAck && !socket.destroyed) socket.write(encode(['sync', selfAck]));
+      selfAck = null;
+    };
     const toBrowser = (text) => {
       if (ws.readyState !== ws.OPEN) return;
+      if (videoSource && text.includes('4.size,1.0,')) {
+        const m = [...text.matchAll(/(?:^|;)4\.size,1\.0,\d+\.(\d+),\d+\.(\d+);/g)].at(-1);
+        if (m && desktopSize) videoSource.setSize(Number(m[1]), Number(m[2]), desktopSize);
+      }
       const ts = pacer && lastSyncTimestamp(text);
       ws.send(text, ts ? (err) => { if (!err) pacer.sent(ts, ws.bufferedAmount); } : undefined);
     };
@@ -307,6 +342,9 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors }, log) {
       if (closed) return;
       closed = true;
       scaler?.close();
+      clearTimeout(selfAckTimer);
+      if (uuid) video?.withdraw(uuid);
+      videoSource?.close();
       socket.destroy();
       if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) ws.close(code, reason);
     };
@@ -360,14 +398,27 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors }, log) {
             encode(['connect', ...values]),
         );
         handshakeDone = true;
-        log(`screen: connecting RDP ${rdp.hostname}:${port} (${source}, quality ${quality}, ${priority}, scale ${sized ? 'n/a' : res}, browser ${width}x${height}${layout ? `, desktop ${layout.width}x${layout.height} at GNOME scale ${layout.scale}` : ''})`);
+        log(`screen: connecting RDP ${rdp.hostname}:${port} (${source}, ${encoding}, quality ${quality}, ${priority}, scale ${sized ? 'n/a' : res}, browser ${width}x${height}${layout ? `, desktop ${layout.width}x${layout.height} at GNOME scale ${layout.scale}` : ''})`);
 
         // First message tells the browser tunnel its UUID and marks it open.
-        ws.send(encode(['', randomUUID()]));
+        uuid = randomUUID();
+        if (videoSource) video.offer(uuid, videoSource);
+        ws.send(encode(['', uuid]));
         instructions = instructions.slice(argsIdx + 1);
       }
 
       if (!instructions.length) return;
+      if (videoSource) {
+        const size = instructions.findLast((i) => i.elements[0] === 'size' && i.elements[1] === '0');
+        if (size) desktopSize = [Number(size.elements[2]), Number(size.elements[3])];
+        const sync = instructions.findLast((i) => i.elements[0] === 'sync');
+        if (sync) {
+          selfAck = sync.elements[1];
+          selfAckTimer ??= setTimeout(ackGuacd, VIDEO_SELF_ACK_MS);
+        }
+        instructions = drawFilter(instructions);
+        if (!instructions.length) return;
+      }
       if (source === 'session' && layout.scale > 1) {
         const size = instructions.findLast((i) => i.elements[0] === 'size' && i.elements[1] === '0');
         if (size) scaleSession(Number(size.elements[2]), Number(size.elements[3]));
@@ -405,6 +456,7 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors }, log) {
       // one, so holding acknowledgements back caps the frame rate. Only the
       // newest held acknowledgement is sent: it covers every frame before it,
       // and queueing each one would add the wait once per frame.
+      if (videoMode && msg.startsWith('4.sync,')) return;
       if (pacer && msg.startsWith('4.sync,')) {
         const ts = /^4\.sync,\d+\.(\d+)/.exec(msg)?.[1];
         if (ts && !pacer.fromBrowser(ts)) return;

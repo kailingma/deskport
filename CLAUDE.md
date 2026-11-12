@@ -43,3 +43,4 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 - Separate desktop: Chromium browsers open on the main desktop while one is open there (one profile per process). A snap opened there holds its profile, so the same snap cannot start on the main desktop until it is closed.
 - Match this device (My monitor) has never been run against the physical monitor. Never turn it on in a test; only the owner does.
 - Windows XP clients: research only, docs/legacy-clients.md.
+- Video encodings (Send as AV1 or H.264): tested only on the separate desktop and in headless Chromium. Not yet run on My monitor or an extra monitor, or decoded on an iPhone or in Safari. `scripts/video-encoder.py` exits with `os._exit`: GStreamer encoders here (svtav1enc at least) hang on a clean shutdown.

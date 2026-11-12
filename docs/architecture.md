@@ -23,9 +23,12 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | `src/session.js` | Starts, checks and stops the separate desktop's systemd unit, and sets its monitor scale. |
 | `src/monitors.js` | Lists the physical monitors, and for My monitor changes the monitor's mode to fit the viewer and the primary monitor while connected, then puts the configuration back. |
 | `src/pacing.js` | Acknowledges frames to guacd ahead of the browser at Responsiveness. |
+| `src/video.js`, `scripts/video-encoder.py` | The AV1 and H.264 encodings: records the monitor through Mutter's ScreenCast API, encodes it, and serves it on `/ws/video`. |
+| `src/ratecontrol.js` | Bitrate and frame gating for the video encodings, from the browser's frame acknowledgements. |
 | `src/terminal.js` | Attaches a WebSocket to tmux through a pseudo-terminal, with output batching and flow control, and sets PATH and BROWSER for the session. |
 | `public/app.js` | Entry point: views, full screen and the floating toolbar, settings dialog, key row, viewport handling. |
 | `public/js/screen.js` | Screen view: Guacamole client, scaling and zoom, touch gestures, soft keyboard. |
+| `public/js/video.js` | Decodes the video encodings with WebCodecs into Guacamole's default layer. |
 | `src/opener.js`, `bin/xdg-open` | Opens links and files from the terminal in the browser using it. |
 | `public/js/terminal.js` | Terminal view: xterm.js, reconnects, touch scrolling, selection and tmux's menu, copy and paste, appearance settings. |
 | `public/js/host.js` | The host a view talks to: builds every API and WebSocket URL, with an `/h/<id>` prefix for other hosts later. |
@@ -84,6 +87,20 @@ The browser passes three picture settings in the query string: `res` (`auto`, `1
   - Mouse instructions from the browser are divided by the scale on the way back.
   - For `auto`, the scale is chosen when guacd reports the desktop size: the largest picture that fits the browser's device pixels (twice that on touch screens, for pinch-zoom headroom). Output is held until then.
   - Moved regions (`copy`) are rounded to whole pixels at the smaller size, so a scrolled area can sit up to half a pixel off until it is redrawn.
+
+### Video encodings
+
+With `encoding=av1` or `encoding=h264` (Settings, Send as), the picture comes from a video stream and guacd's own drawing is not used:
+
+1. The bridge drops every drawing instruction from guacd that targets a visible layer (layer 0 and above), and the image streams for them (`createDrawFilter()` in `src/video.js`). Layer sizes, off-screen buffers and the pointer (`cursor`, which draws from a buffer) pass through, so the browser's display keeps its size, pointer and input handling. The browser's frame acknowledgements are dropped too; the bridge acknowledges guacd's frames itself at most every 250 ms, which keeps guacd from encoding images nobody sees more often than that.
+2. When guacd reports the desktop's size (after the scaler, so at the size the browser receives), `createVideoSource()` starts `scripts/video-encoder.py` with the bus of the desktop shown (the main session bus, or the separate desktop's private bus) and the monitor: the primary monitor or the one chosen for My monitor; for an extra monitor or the separate desktop, Mutter's virtual monitor of the size guacd reported.
+3. The script asks `org.gnome.Mutter.ScreenCast` to record that monitor (`RecordMonitor`, pointer left out) and gets a PipeWire node. GStreamer scales and converts its frames, and encodes them: `av1enc` (libaom) with the realtime profile, no lookahead and CBR, or `nvh264enc` with the ultra-low-latency tune, CBR and no B-frames. Neither reorders frames. SVT-AV1 was tried first: its low-delay mode stalled in the GStreamer element here, and its default mode added about 1.1 s.
+4. The page opens `/ws/video?tunnel=<the Guacamole tunnel's UUID>`. The server attaches it to that screen connection's video source and sends a `config` message (WebCodecs codec string and size), then each encoded frame as a binary message: a u32 frame number, a keyframe flag, three zero bytes, then the AV1 temporal unit or H.264 access unit (Annex B). No compression on this socket.
+5. `public/js/video.js` decodes with `VideoDecoder` (`optimizeForLatency`) and draws each frame into the Guacamole display's default layer canvas, so zoom, scaling and touch work as with images. After each decoded frame it sends `{"type":"ack","seq":n}`; after a decoder error it acknowledges what arrived, starts a new decoder and asks for a keyframe.
+6. `src/ratecontrol.js` uses the acknowledgements. The base round trip is the lowest acknowledgement time in 10 s. The delivery rate comes from frames that waited behind the frame before them (sent more than a base round trip before the previous acknowledgement arrived): the gap between the two acknowledgements is their own crossing time. Every 250 ms, Adapt lowers the bitrate to 85% of the delivery rate (or by 5% if already below) when the smoothed acknowledgement time rises 40 ms or 30% over the base or frames were skipped, and otherwise raises it by 8% (4% at Data use) while the encoder uses at least half of it, up to 95% of the delivery rate and a ceiling by quality (1.5, 4, 8 or 16 Mbit/s, halved at Data use). Changes reach the encoder on its stdin; both encoders take a new bitrate without restarting.
+7. Frame gating applies to fixed bitrates too: the encoder may take a new frame only while the oldest unacknowledged one is younger than the base round trip plus 80 ms (250 ms at Data use; at least 1.5 times the base), and the bytes in flight would cross at the delivery rate within that time. Captured frames in between are dropped, except the newest, which is encoded as soon as the gate opens. The frame rate cap (30, or 10 at Data use) works the same way.
+
+When the separate desktop resizes its monitor, Mutter ends the recording and the source restarts the encoder at the new size. If the encoder fails for good, the page is told, and it reconnects with images until the screen settings change. The browser checks `VideoDecoder.isConfigSupported()` first and sends images if it cannot decode the chosen codec.
 
 `source` picks what the Screen view shows:
 
@@ -146,6 +163,7 @@ xterm draws with its WebGL renderer, and falls back to the DOM renderer if WebGL
 | deskport | `deskport.service` (systemd user) | 127.0.0.1:7900 |
 | cloudflared | `deskport-tunnel.service` (systemd user) | outbound only |
 | guacd | Docker, `restart: unless-stopped` | 127.0.0.1:4822 |
+| video encoder (`scripts/video-encoder.py`) | deskport, one per screen connection with a video encoding | none (stdin and stdout) |
 | gnome-remote-desktop | `gnome-remote-desktop.service` (systemd user) | *:3390 |
 | separate desktop (gnome-shell and gnome-remote-desktop, headless) | `deskport-session.service` (systemd user, started on demand) | *:3391 |
 | tmux server | started on first terminal connection | Unix socket |

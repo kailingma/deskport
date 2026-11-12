@@ -2,6 +2,7 @@ import Guacamole from '/vendor/guacamole-common.js';
 import { settings } from './settings.js';
 import { KS, keysymFor, takeMods } from './keys.js';
 import { createScroller, touchMid, touchDist } from './gestures.js';
+import { createVideo, videoSupport } from './video.js';
 
 const $ = (id) => document.getElementById(id);
 const LONG_PRESS_MS = 450;
@@ -37,6 +38,16 @@ export function createScreen({ host, setStatus, toast }) {
   let drops = 0; // connections lost in a row without staying up
   let dropTimer = null;
   let waitingForWake = false;
+  // Video encodings (video.js): what this browser decodes, the stream of the
+  // current connection, and whether it failed and images are used until the
+  // settings change.
+  let decodes = null;
+  videoSupport().then((s) => { decodes = s; });
+  let video = null;
+  let videoStats = null;
+  let encodingInUse = 'images';
+  let imagesInstead = false;
+  let warnedUnsupported = '';
 
   const overlay = (title, body) => {
     $('screen-overlay-title').textContent = title;
@@ -301,9 +312,20 @@ export function createScreen({ host, setStatus, toast }) {
   });
 
   function connect() {
+    const wanted = imagesInstead ? 'images' : settings.get('encoding');
+    if (wanted !== 'images' && !decodes) {
+      videoSupport().then(connect);
+      return;
+    }
+    const encoding = wanted === 'images' || decodes[wanted] ? wanted : 'images';
+    if (encoding !== wanted && warnedUnsupported !== wanted) {
+      warnedUnsupported = wanted;
+      toast(`This browser cannot decode ${wanted === 'av1' ? 'AV1' : 'H.264'} video, so the screen is sent as images`);
+    }
     clearTimeout(dropTimer);
     waitingForWake = false;
     disconnect();
+    encodingInUse = encoding;
     wantConnected = true;
     stale = false;
     zoom = 1;
@@ -336,6 +358,7 @@ export function createScreen({ host, setStatus, toast }) {
         case 1: case 2: setStatus('screen', 'busy', 'Connecting'); break;
         case 3:
           setStatus('screen', 'ok', 'Connected');
+          if (encoding !== 'images' && !video) startVideo(c, tunnel);
           setTimeout(() => { if (client === c) drops = 0; }, STABLE_MS);
           // GNOME desktop sharing can accept a session and then send no picture.
           setTimeout(() => {
@@ -403,13 +426,33 @@ export function createScreen({ host, setStatus, toast }) {
       priority: settings.get('priority'),
       res: settings.get('resolution'),
       source: settings.get('source'),
+      ...(encoding !== 'images' ? { encoding, speed: String(settings.get('encSpeed')), bitrate: settings.get('bitrate') } : {}),
       ...(matched ? { match: '1' } : {}),
       ...(settings.get('monitor') !== 'primary' ? { monitor: settings.get('monitor') } : {}),
     });
     c.connect(params.toString());
   }
 
+  function startVideo(c, tunnel) {
+    video = createVideo({
+      url: `${host.ws('/ws/video')}?tunnel=${encodeURIComponent(tunnel.uuid)}`,
+      canvas: () => c.getDisplay().getDefaultLayer().getCanvas(),
+      onStats: (s) => { videoStats = s; },
+      onError: (message) => {
+        if (client !== c || !wantConnected) return;
+        // The encoder could not run (or stopped): show images instead until
+        // the picture settings change.
+        toast(`${message} Showing the screen as images instead.`);
+        imagesInstead = true;
+        connect();
+      },
+    });
+  }
+
   function disconnect() {
+    video?.close();
+    video = null;
+    videoStats = null;
     wantConnected = false;
     keyboard?.reset();
     if (keyboard) keyboard.onkeydown = keyboard.onkeyup = null;
@@ -494,8 +537,8 @@ export function createScreen({ host, setStatus, toast }) {
 
   return {
     ensureConnected() { if (!client || stale) connect(); },
-    markStale() { stale = true; },
-    reconnect() { drops = 0; connect(); },
+    markStale() { stale = true; imagesInstead = false; },
+    reconnect() { drops = 0; imagesInstead = false; connect(); },
     focus() { wrap.focus({ preventScroll: true }); },
     releaseKeys() { keyboard?.reset(); },
     showKeyboard() { ime.focus({ preventScroll: true }); },
@@ -511,5 +554,9 @@ export function createScreen({ host, setStatus, toast }) {
       const d = client?.getDisplay();
       return d?.getWidth() ? [d.getWidth(), d.getHeight()] : null;
     },
+    /** The encoding of the current connection and, for video, its latest numbers. */
+    videoInfo() { return { encoding: encodingInUse, stats: videoStats }; },
+    /** Resolves to which video encodings this browser decodes. */
+    videoSupport,
   };
 }

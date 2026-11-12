@@ -11,6 +11,9 @@ export const DEFAULTS = {
   resolution: 'auto', // auto | 1 | 0.75 | 0.5 | 0.33 (scale of the desktop's native size)
   quality: 'high', // low | medium | high | lossless
   priority: 'speed', // speed: every frame | data: about 10 frames per second
+  encoding: 'images', // images: guacd's pictures | av1 | h264: a video stream (src/video.js)
+  encSpeed: 0, // video encoder speed: 0 fastest | 1 balanced | 2 smallest
+  bitrate: 'auto', // video: auto adapts to the connection, or a fixed kbit/s
   touchScroll: 'natural', // natural | reversed
   termTheme: 'deskport-dark',
   termFont: 'system',
