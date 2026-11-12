@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "deskport-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "export PATH=\"$HOME/.local/share/fnm/aliases/default/bin:$PATH\" && DESKPORT_PORT=7901 exec npm run dev"],
+      "port": 7901
+    }
+  ]
+}
