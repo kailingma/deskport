@@ -10,6 +10,7 @@ import { config, validateConfig } from './config.js';
 import { createAuthenticator, AuthError, sameOrigin } from './auth.js';
 import { handleScreen } from './guac.js';
 import { handleTerminal } from './terminal.js';
+import { createSessionControl } from './session.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const log = (msg) => console.log(`[deskport] ${msg}`);
@@ -49,6 +50,25 @@ app.use((req, res, next) => {
 
 app.get('/api/me', (req, res) => {
   res.json({ email: req.user.email, host: os.hostname(), dev: Boolean(req.user.dev) });
+});
+
+const session = createSessionControl({
+  unit: config.rdp.sessionUnit,
+  host: config.rdp.hostname,
+  port: config.rdp.sessionPort,
+  log,
+});
+app.get('/api/session', async (req, res) => {
+  res.set('Cache-Control', 'no-store').json(await session.state());
+});
+app.post('/api/session/stop', async (req, res) => {
+  if (!sameOrigin(req)) return res.status(403).json({ error: 'cross-origin request' });
+  try {
+    await session.stop();
+    res.json(await session.state());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 
@@ -138,7 +158,7 @@ server.on('upgrade', async (req, socket, head) => {
   }
   target.handleUpgrade(req, socket, head, (ws) => {
     log(`${pathname} opened by ${req.user.email}`);
-    if (target === screenWss) handleScreen(ws, req, config, log);
+    if (target === screenWss) handleScreen(ws, req, { ...config, session }, log);
     else handleTerminal(ws, config.terminal, log);
   });
 });

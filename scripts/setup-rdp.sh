@@ -36,3 +36,14 @@ grdctl rdp enable
 systemctl --user enable --now gnome-remote-desktop.service
 systemctl --user restart gnome-remote-desktop.service
 echo "GNOME desktop sharing is on port $RDP_PORT"
+
+# The separate desktop (scripts/desktop-session.sh) runs gnome-remote-desktop in
+# headless mode with the same credentials. Its settings are written directly:
+# "grdctl --headless rdp enable" would also start gnome-remote-desktop-headless,
+# which stops the desktop sharing above.
+RDP_SESSION_PORT="${RDP_SESSION_PORT:-3391}"
+gsettings set org.gnome.desktop.remote-desktop.rdp.headless port "$RDP_SESSION_PORT"
+gsettings set org.gnome.desktop.remote-desktop.rdp.headless negotiate-port false
+gsettings set org.gnome.desktop.remote-desktop.rdp.headless enable true
+grdctl --headless rdp set-credentials "$RDP_USERNAME" "$RDP_PASSWORD"
+echo "the separate desktop will use port $RDP_SESSION_PORT"

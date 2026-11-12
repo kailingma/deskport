@@ -2,7 +2,7 @@
 
 A Linux desktop's live screen and a persistent terminal in one browser tab. It is served from the machine itself through a Cloudflare Tunnel and gated by Cloudflare Access.
 
-- **Screen** shows the real logged-in GNOME session (what is on the monitor), with mouse, keyboard, touch and clipboard. It uses GNOME's built-in RDP desktop sharing and Apache guacd.
+- **Screen** shows the real logged-in GNOME session (what is on the monitor), with mouse, keyboard, touch and clipboard. It uses GNOME's built-in RDP desktop sharing and Apache guacd. It can instead show an extra monitor, or a separate GNOME desktop sized to your device.
 - **Terminal** is a tmux session (`web` by default) in xterm.js. Closing the tab only detaches; programs keep running. You can attach to the same session locally with `tmux attach -t web`.
 - **Access**: only Cloudflare Access can reach it, and the server checks the Access token itself on every request and WebSocket.
 
@@ -21,6 +21,7 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
 | Control | What it does |
 | --- | --- |
 | Screen / Terminal (Alt+1 / Alt+2) | Switch views. Both stay connected in the background. |
+| Show menu | Switches the Screen view between My monitor, Extra monitor and Separate desktop (see below). |
 | Clipboard button | Sends your local clipboard to the remote desktop; paste there with Ctrl+V. Copying on the remote desktop fills your local clipboard. |
 | Grid button | Presses Super (opens Activities). |
 | Sliders button | Opens settings. |
@@ -29,7 +30,8 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
 
 ### iPhone
 
-- **Bottom tab bar**: Screen, Terminal, and More. More opens a sheet with Show keyboard, Send clipboard, Press Super, Send Ctrl+Alt+Delete, Reconnect and Settings.
+- **No top bar**: the views use the whole screen. A bottom tab bar switches between Screen and Terminal; a dot on a tab means that view is connecting or disconnected.
+- **More** opens a sheet with what to Show (My monitor, Extra monitor, Separate desktop), Show keyboard, Send clipboard, Press Super, Send Ctrl+Alt+Delete, Reconnect, Settings and Full screen.
 - **Key row**: Esc, Tab, Ctrl, Alt, the arrow keys, and `/ - | ~`. It appears above the on-screen keyboard, and always in the Terminal view. Ctrl and Alt stay on for the next key you press, so Ctrl then `c` sends Ctrl+C.
 - **Touch on the Screen view**:
 
@@ -44,7 +46,7 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
   | Two-finger tap | Right click |
 
 - **Touch in the Terminal view**: drag to scroll (tmux scrollback when tmux has the mouse, which it does with `set -g mouse on`), long press then drag to select. tmux copies the selection to its buffer when you lift your finger.
-- **Full screen**: iPhone Safari has no full-screen mode for web pages. Use Share, then Add to Home Screen, to get deskport without Safari's toolbars.
+- **Full screen**: iPhone Safari has no full-screen mode for web pages. More, then Full screen, explains the alternative: Share, then Add to Home Screen. Opened from that icon, deskport fills the screen, including the area behind the status bar. The Home Screen app keeps its own cookies, so it asks you to sign in once. Android browsers use real full screen.
 
 ### Settings
 
@@ -53,8 +55,8 @@ The sliders button in the top bar (or More, then Settings, on a phone) opens the
 | Setting | Options |
 | --- | --- |
 | Theme | System, Light, Dark |
-| Show | My monitor (default), or Virtual display (experimental, see below) |
-| Resolution | Auto (fits this screen, with room to pinch-zoom 2x on touch screens), Full size, 75%, 50%, 33% |
+| Show | My monitor (default), Extra monitor, Separate desktop (see below) |
+| Resolution | Auto (fits this screen, with room to pinch-zoom 2x on touch screens), Full size, 75%, 50%, 33%. Only for My monitor; the other two are always made at this device's size. |
 | Picture quality | Low, Medium, High, Lossless |
 | Prioritize | Responsiveness (every frame) or Data use (about 10 frames per second) |
 | Touch scrolling | Natural or reversed direction |
@@ -65,7 +67,15 @@ The sliders button in the top bar (or More, then Settings, on a phone) opens the
 
 Screen settings apply when you close settings; the screen reconnects.
 
-**Virtual display (experimental, untested).** Instead of mirroring your monitor, GNOME adds a virtual monitor shaped to the device you connect from, and resizes it when the window changes or the phone rotates. The desktop rearranges for it like a second monitor; move windows onto it to see them. Turning it on changes GNOME's monitor layout while you're connected. That kind of change once left this machine's display unable to draw until a re-login, so it is off by default. If the screen misbehaves, switch back to My monitor and log out and in.
+### What the Screen view shows
+
+| Show | What you get |
+| --- | --- |
+| My monitor | Exactly what is on the physical monitor, at its resolution, shrunk to fit. |
+| Extra monitor | GNOME adds a second monitor next to the physical one, sized to your window in CSS pixels and resized when the window changes or the phone rotates. It is a secondary monitor, so it has only the wallpaper: no top bar, dock or icons. Drag windows onto it from the main monitor. Only one device can use desktop sharing in one mode at a time, so switching a device to this mode changes it for any other device showing My monitor. |
+| Separate desktop | A second GNOME desktop for the same user, with its own top bar, dock and windows, sized to your device. It runs headless (no physical monitor), so it never changes the monitor or what is on it, and any number of devices can use it next to My monitor. On high-density screens (iPhones, Retina laptops) GNOME draws it at scale 2, so text is sharp and readable; on screens too small for that, it is made at CSS-pixel size and the browser enlarges it. It starts the first time you pick it (a few seconds) and keeps running, with any apps you opened, until you end it in Settings. It uses about 400 to 600 MB of memory. |
+
+The separate desktop shares your files, settings and keyring with the main desktop. Apps that allow only one copy per user, such as Firefox with the same profile, cannot run in both at once. File indexing runs only on the main desktop.
 
 ### Speed
 
@@ -73,7 +83,7 @@ GNOME desktop sharing in mirror mode always sends the monitor at its native reso
 
 - **Resolution**: below Full size, the server shrinks every image guacd produces and scales every drawing coordinate, then scales your mouse back up. Auto picks the smallest size that still fills your screen's pixels.
 - **Quality**: Low and Medium re-encode images as JPEG at quality 35 and 60. High keeps guacd's own images. Lossless makes guacd send exact pixels.
-- **Prioritize**: Responsiveness sends every frame as soon as it is ready. Data use holds frame acknowledgements back so guacd sends about 10 frames per second.
+- **Prioritize**: Responsiveness sends every frame as soon as it is ready. Data use holds frame acknowledgements back so guacd sends at most 10 frames per second. Only the newest held acknowledgement is sent, so typing never waits more than 100 ms for it.
 - Screen messages are compressed (permessage-deflate), and audio is not requested.
 
 Measured on this 4K desktop while it was busy (read-only sessions, 10 seconds each):
@@ -88,6 +98,16 @@ Measured on this 4K desktop while it was busy (read-only sessions, 10 seconds ea
 | 50%, Low, Data use | 1920 × 1080 | 180 KB/s |
 
 Re-encoding did not lower the frame rate in these runs. `node scripts/measure-screen.mjs [seconds] [ws://host:port] [query ...]` repeats the measurement against a dev server.
+
+Time from a key press to the first screen update reaching the browser, measured on the separate desktop on this machine (no network in between; 24 keys each):
+
+| Setting | Median | 90th percentile |
+| --- | --- | --- |
+| High, Responsiveness | 20 ms | 28 ms |
+| Low, Responsiveness | 45 ms | 50 ms |
+| High, Data use | 39 ms | 47 ms |
+
+Before the fix described under Prioritize, Data use had a 90th percentile of 1.5 s and 5 of 24 keys showed no update within 3 s. `node scripts/measure-typing.mjs [ws://host:port] [query ...]` repeats this; it types only into the separate desktop.
 
 ### Connection states
 
@@ -124,6 +144,7 @@ npm test         # protocol parser tests
 npm run check    # syntax check of every source file
 node scripts/make-icons.mjs   # regenerate public/icons/*.png from the icon geometry
 node scripts/measure-screen.mjs 15 ws://127.0.0.1:7900   # bandwidth per quality preset
+node scripts/measure-typing.mjs ws://127.0.0.1:7900      # key-to-screen latency, on the separate desktop
 ```
 
 There is no build step. The page is plain ES modules; browser libraries (guacamole-common-js, xterm.js, Inter) are served from `node_modules` under `/vendor/`.
@@ -131,6 +152,6 @@ There is no build step. The page is plain ES modules; browser libraries (guacamo
 ## Limits
 
 - The desktop must have a logged-in GNOME session. A locked screen shows the lock screen, which you can unlock remotely.
-- One screen is shared: the primary monitor, at its own resolution, scaled to fit your window.
+- My monitor shares the primary monitor only, at its own resolution, scaled to fit your window.
 - GNOME desktop sharing listens on all interfaces on its port. Firewall it if the machine is on an untrusted network.
 - `node-pty` is a native module. After changing Node major versions, run `npm rebuild node-pty` and `./scripts/install-services.sh`.

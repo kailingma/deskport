@@ -2,6 +2,25 @@
 
 Choices made while building deskport, newest first, with the reason for each. Entries marked *autonomous* were made while the owner was away and asked for choices to be made and logged.
 
+## 2026-11-11 (evening)
+
+### Separate desktop instead of fixing the extra monitor
+The owner found that the virtual display (extend mode) works but shows only wallpaper, and asked for a screen sized to the device that does not conflict with the main one. GNOME draws the top bar and dock only on the primary monitor, so an extend-mode monitor will always be bare unless it becomes primary, which would rearrange the physical desktop. Instead, deskport now runs a second, headless GNOME Shell for the same user with its own headless gnome-remote-desktop on port 3391. GNOME's supported headless setup (`gnome-headless-session@.service` through GDM) needs root and a separate login session, which GNOME does not allow alongside an existing one for the same user, so the session runs as a user unit on a private D-Bus bus and runtime directory instead. Tested here: it starts in about 5 seconds, uses 350 to 600 MB, shows GNOME's top bar, dock and desktop icons, and the main desktop's Wayland and accessibility sockets stay untouched once the runtime directory is private. The extend-mode option stays, renamed Extra monitor, with help text saying it has no top bar.
+
+During the first test runs, before the runtime directory was made private, the second session's accessibility bus replaced the main desktop's socket at `$XDG_RUNTIME_DIR/at-spi/bus`; the socket file is now gone. Apps started on the main desktop since then may have no accessibility support (screen reader, some on-screen keyboard features) until the next login.
+
+### Monitor scale in the separate desktop
+GNOME made each client's monitor at scale 1 regardless of the DPI guacd passes, which made a 3x iPhone show text at a third of its normal size. Because the separate desktop's GNOME has its own bus and no physical monitors, deskport sets the scale there through Mutter's DisplayConfig, a temporary change that writes nothing to `monitors.xml`. Virtual monitors only offered whole-number scales that leave at least 800 × 480 logical pixels, so a 3x iPhone gets scale 2 (about 584 × 1140 logical pixels) and smaller screens get a CSS-pixel-sized desktop at scale 1. This is never done for the main desktop. Checked with a simulated 3x phone connection (GNOME reported 1168 × 2280 at scale 2); not yet seen on a real iPhone.
+
+### Typing stalls in Data use mode
+The owner reported the picture freezing while typing. Measured on the separate desktop: at Responsiveness a key took 20 ms (median) to show up, but in Data use 5 of 24 keys produced no update within 3 s and the 90th percentile was 1.5 s. The bridge queued each held frame acknowledgement 100 ms after the previous one, so a burst of frames built up a backlog. It now keeps only the newest held acknowledgement; Data use measured 39 ms median and 47 ms at the 90th percentile afterwards. If the freezes also happened at Responsiveness, the likely remaining cause is the network: at My monitor the full 4K picture can exceed a mobile connection, and frames queue behind it. Auto resolution and Low quality reduce that.
+
+### Phone layout without the top bar
+The owner said the top bar wastes space on a phone. Phones (and touch screens under 500 px tall, so landscape phones too) no longer show it; the bottom tab bar carries a status dot, and the More sheet gained the Show choice. iPhone Safari cannot hide its own bars for a page, so More, Full screen explains Add to Home Screen; from the Home Screen the page now draws behind the status bar (`black-translucent`) with a dark strip under the clock. The manifest asks for `fullscreen` display, which Android honours.
+
+### Settings help text
+The owner found the help text too long to skim but did not want shorthand. Each help line is now one or two specific sentences (for example "JPEG at 60% quality. Text is readable."), and quality and priority each have their own line.
+
 ## 2026-11-11
 
 ### Screen touch gestures reworked (*autonomous*)

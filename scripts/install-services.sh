@@ -2,6 +2,7 @@
 # Write and start the deskport systemd user services.
 #   deskport.service         the web server, using the node currently on PATH
 #   deskport-tunnel.service  cloudflared, if ~/.cloudflared/deskport.yml exists
+#   deskport-session.service the separate headless desktop, started on demand
 # Re-run after moving the repo or changing Node versions.
 set -euo pipefail
 
@@ -35,6 +36,22 @@ Environment=NODE_ENV=production
 WantedBy=default.target
 UNIT
 echo "wrote deskport.service (node: $NODE)"
+
+# The separate desktop. Not enabled: deskport starts it on the first
+# "Separate desktop" connection, and it runs until ended from the settings.
+rm -f "$UNIT_DIR/deskport-session.service"
+cat > "$UNIT_DIR/deskport-session.service" <<UNIT
+[Unit]
+Description=deskport separate desktop (headless GNOME session)
+Conflicts=gnome-remote-desktop-headless.service
+
+[Service]
+Type=simple
+ExecStart=$REPO/scripts/desktop-session.sh
+MemoryHigh=2G
+MemoryMax=3G
+UNIT
+echo "wrote deskport-session.service"
 
 units=(deskport.service)
 if [[ -f "$TUNNEL_CONFIG" ]]; then

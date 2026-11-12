@@ -212,7 +212,7 @@ A single full-viewport column: top bar, then the view fills the rest. The bar is
 
 Full screen replaces the bar with a floating toolbar (48px, 12px radius, centred 10px from the top) and hides the wordmark. When idle it slides up out of view and a 64 by 18px handle remains at the top edge.
 
-Phone (max-width 640px): the bar shrinks to 44px and shows only the host (in primary ink) and the status badge; the segmented control, tools and divider are hidden. A 56px bottom tab bar offers Screen, Terminal and More. More opens an actions sheet (keyboard, clipboard, Super, Ctrl+Alt+Del, reconnect, settings, full screen where supported). Settings becomes a bottom sheet with 16px top radius. On touch devices a key row (Esc, Tab, Ctrl, Alt, arrows, / - | ~) docks above the on-screen keyboard and replaces the tab bar while the keyboard is open; it is always shown in the terminal on phones unless set to Never.
+Phone (max-width 640px, or a touch screen under 500px tall): there is no top bar; the view fills the screen down to the tab bar, below the status-bar safe area, which stays the dark stage colour. A 56px bottom tab bar (44px with icon and label side by side in landscape) offers Screen, Terminal and More; a 8px warning or error dot on a tab's icon shows a view that is connecting or disconnected. More opens a sheet with a Show list (check mark on the current source) above the actions (keyboard, clipboard, Super, Ctrl+Alt+Del, reconnect, settings, full screen, or on iPhone Safari a sheet explaining Add to Home Screen). Settings becomes a bottom sheet with 16px top radius. On touch devices a key row (Esc, Tab, Ctrl, Alt, arrows, / - | ~) docks above the on-screen keyboard and replaces the tab bar while the keyboard is open; it is always shown in the terminal on phones unless set to Never.
 
 ## Elevation & Depth
 
@@ -245,7 +245,7 @@ Rounded rectangles with small, consistent corners: 6px inside compact groups (se
 - 24px pill, Surface Raised, hairline, 12px/500 text, with a 7px dot coloured by connection state (busy pulses). Error state also turns the text red.
 
 ### Navigation
-- Desktop: the top bar above. Phone: the bottom tab bar, 56px, 11px labels over 22px icons, selected item in Dashboard Blue.
+- Desktop: the top bar above, with a compact Show select before the screen tools. Phone: the bottom tab bar, 56px, 11px labels over 22px icons, selected item in Dashboard Blue.
 
 ### Floating toolbar
 - The full-screen form of the top bar, described under Layout. It hides itself when idle and returns on interaction or via its handle.

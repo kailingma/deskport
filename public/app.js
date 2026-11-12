@@ -8,7 +8,11 @@ const $ = (id) => document.getElementById(id);
 const wsBase = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 const canFullscreen = Boolean(document.fullscreenEnabled);
 const coarse = matchMedia('(pointer: coarse)');
+// Running from a Home Screen icon: no browser bars to hide.
+const standalone = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || navigator.standalone === true;
 document.documentElement.classList.toggle('can-fullscreen', canFullscreen);
+// iPhone Safari has no full-screen mode for pages; offer the Home Screen route instead.
+document.documentElement.classList.toggle('can-install', !canFullscreen && !standalone && coarse.matches);
 
 // ---------- status, toast ----------
 
@@ -18,6 +22,9 @@ let view = 'screen';
 
 function setStatus(which, state, text) {
   status[which] = [state, text];
+  // Phones have no top bar; the tab bar shows a dot while a view is not connected.
+  const dot = document.querySelector(`.tab-dot[data-status-for="${which}"]`);
+  if (dot) dot.dataset.state = state;
   if (which !== view) return;
   statusEl.dataset.state = state;
   statusEl.querySelector('.badge-text').textContent = text;
@@ -133,19 +140,20 @@ handle.addEventListener('click', wakeBar);
 const settingsDialog = $('settings');
 const QUALITY = ['low', 'medium', 'high', 'lossless'];
 const QUALITY_HELP = {
-  low: 'Low: heavily compressed, smallest and quickest to arrive.',
-  medium: 'Medium: compressed, text stays readable.',
-  high: 'High: sharp, compressed only while the picture changes.',
-  lossless: 'Lossless: exact pixels. Uses the most data.',
+  low: 'JPEG at 35% quality. Small text is hard to read. Uses the least data.',
+  medium: 'JPEG at 60% quality. Text is readable.',
+  high: 'Sharp. Areas that are changing look soft for a moment.',
+  lossless: 'Exact pixels. Uses about a third more data than High.',
 };
 const PRIORITY_HELP = {
-  speed: 'Every frame is sent as soon as it is ready.',
-  data: 'About 10 frames per second, to save data and battery.',
+  speed: 'Sends every frame as soon as it is ready.',
+  data: 'Sends at most 10 frames a second.',
 };
 const SCREEN_SETTINGS = ['source', 'resolution', 'quality', 'priority'];
 const SOURCE_HELP = {
-  mirror: 'Shows exactly what is on your monitor, at its resolution.',
-  virtual: 'Experimental: GNOME adds a virtual monitor shaped to this device while you are connected, and the desktop rearranges for it. Move windows onto it to see them. It changes GNOME\'s monitor layout, which has upset this machine\'s display before; if the screen misbehaves, switch back and log out and in.',
+  mirror: 'What is on your monitor, at its resolution.',
+  virtual: 'A second monitor next to yours, sized to this device. It has no top bar or dock, so drag windows onto it.',
+  session: 'A separate GNOME desktop sized to this device. Your monitor is not affected.',
 };
 let screenAtOpen = '';
 
@@ -164,13 +172,18 @@ function syncSettingsForm() {
       b.tabIndex = on ? 0 : -1;
     }
   }
-  $('source-help').textContent = SOURCE_HELP[settings.get('source')];
+  const source = settings.get('source');
+  $('set-source').value = source;
+  $('source-help').textContent = SOURCE_HELP[source];
   $('set-resolution').value = settings.get('resolution');
-  $('set-resolution').disabled = settings.get('source') === 'virtual';
+  $('set-resolution').disabled = source !== 'mirror';
   const size = screen.pictureSize();
-  $('resolution-help').textContent = size ? `Receiving ${size[0]} × ${size[1]} pixels.` : '';
+  $('resolution-help').textContent = source !== 'mirror'
+    ? 'Always matches this window.'
+    : size ? `Receiving ${size[0]} × ${size[1]} pixels.` : '';
   $('set-quality').value = String(QUALITY.indexOf(settings.get('quality')));
-  $('quality-help').textContent = `${QUALITY_HELP[settings.get('quality')]} ${PRIORITY_HELP[settings.get('priority')]}`;
+  $('quality-help').textContent = QUALITY_HELP[settings.get('quality')];
+  $('priority-help').textContent = PRIORITY_HELP[settings.get('priority')];
   $('set-term-theme').value = settings.get('termTheme');
   $('set-term-font').value = settings.get('termFont');
   $('set-term-size').value = String(settings.get('termFontSize'));
@@ -204,6 +217,7 @@ settingsDialog.addEventListener('input', (e) => {
   else if (t.id === 'set-blink') settings.set('cursorBlink', t.checked);
   else if (t.dataset.setting) settings.set(t.dataset.setting, t.value);
   syncSettingsForm();
+  if (t.id === 'set-source') refreshSession();
 });
 const screenSettings = () => SCREEN_SETTINGS.map((k) => settings.get(k)).join('|');
 
@@ -220,8 +234,70 @@ settingsDialog.addEventListener('close', () => {
 function openSettings() {
   screenAtOpen = screenSettings();
   syncSettingsForm();
+  refreshSession();
   settingsDialog.showModal();
 }
+
+// ---------- the separate desktop ----------
+
+async function refreshSession() {
+  const row = $('session-row');
+  try {
+    const s = await (await fetch('/api/session')).json();
+    row.hidden = s.state === 'stopped' && settings.get('source') !== 'session';
+    $('session-state').textContent = {
+      running: `Running${s.memoryMB ? ` and using ${s.memoryMB} MB of memory` : ''}. Apps in it keep running after you disconnect.`,
+      starting: 'Starting.',
+      stopped: 'Not running. It starts when you show it.',
+      missing: 'Not installed. Run scripts/install-services.sh on the computer.',
+    }[s.state] ?? 'Unknown';
+    $('end-session').hidden = s.state !== 'running' && s.state !== 'starting';
+  } catch {
+    row.hidden = true;
+  }
+}
+
+async function endSession() {
+  if (!confirm('End the separate desktop? Apps open in it will close.')) return;
+  $('end-session').disabled = true;
+  try {
+    const r = await fetch('/api/session/stop', { method: 'POST' });
+    if (!r.ok) throw new Error((await r.json()).error);
+    toast('Separate desktop ended');
+    if (settings.get('source') === 'session') screen.markStale();
+  } catch (err) {
+    toast(`Could not end it: ${err.message}`);
+  }
+  $('end-session').disabled = false;
+  refreshSession();
+}
+
+// ---------- quick source switch (top bar, More sheet) ----------
+
+function syncSource() {
+  const source = settings.get('source');
+  $('quick-source').value = source;
+  for (const b of document.querySelectorAll('[data-source]')) b.setAttribute('aria-checked', String(b.dataset.source === source));
+}
+
+function switchSource(source) {
+  if (source === settings.get('source')) return;
+  settings.set('source', source);
+  if (view === 'screen') screen.reconnect();
+  else screen.markStale();
+}
+
+$('quick-source').addEventListener('change', (e) => {
+  switchSource(e.target.value);
+  if (!coarse.matches) screen.focus();
+});
+$('sheet-source').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-source]');
+  if (!b) return;
+  switchSource(b.dataset.source);
+  sheet.close();
+});
+syncSource();
 
 // Theme and key-row preferences that live outside the views.
 function applyTheme() {
@@ -241,6 +317,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme
 settings.onChange((key) => {
   if (key === 'theme') applyTheme();
   if (key === 'keyRow') applyKeyRow();
+  if (key === 'source') syncSource();
 });
 
 // ---------- actions (top bar, toolbar, sheet) ----------
@@ -258,6 +335,9 @@ const actions = {
   'close-sheet': () => sheet.close(),
   settings: openSettings,
   'close-settings': () => settingsDialog.close(),
+  'end-session': endSession,
+  install: () => $('install').showModal(),
+  'close-install': () => $('install').close(),
 };
 
 document.addEventListener('click', (e) => {
@@ -269,6 +349,7 @@ document.addEventListener('click', (e) => {
   if (!coarse.matches && view === 'screen' && !keepFocus) screen.focus();
 });
 sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
+$('install').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
 
 // ---------- key row ----------
 

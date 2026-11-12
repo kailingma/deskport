@@ -100,11 +100,35 @@ const QUALITIES = new Set(['low', 'medium', 'high', 'lossless']);
 const SCALES = new Set(['1', '0.75', '0.5', '0.33']);
 const DATA_SAVER_FRAME_MS = 100;
 
-// Screen source. "mirror" shares the physical monitor. "virtual" (experimental,
-// off by default in the settings) switches GNOME desktop sharing to extend mode:
-// GNOME adds a virtual monitor sized to the browser for the session and resizes
-// it as the browser window changes. That reconfigures GNOME's monitors while
-// connected, so it is opt-in.
+// Screen source:
+//   mirror   the physical monitor (GNOME desktop sharing in mirror-primary mode).
+//   virtual  an extra monitor: GNOME desktop sharing in extend mode adds a
+//            virtual monitor sized to the browser beside the physical one, and
+//            resizes it as the browser window changes. It is a secondary
+//            monitor, so it has no top bar; windows have to be moved onto it.
+//   session  a separate headless GNOME desktop on its own RDP port
+//            (session.js), with one monitor sized to the browser.
+const SOURCES = new Set(['mirror', 'virtual', 'session']);
+
+// GNOME offers a monitor scale only if the scaled desktop keeps at least this
+// many logical pixels, and virtual monitors only get whole-number scales here.
+const MIN_LOGICAL_AREA = 800 * 480;
+
+/**
+ * Picks how the separate desktop fills a browser of w x h device pixels at the
+ * given DPI: at full device resolution with a GNOME scale of 2 or more when
+ * GNOME allows one (sharp, right-sized text), otherwise at CSS-pixel size and
+ * scale 1, which the browser enlarges.
+ */
+export function sessionLayout(w, h, dpi) {
+  for (let s = Math.floor(dpi / 96 + 0.25); s >= 2; s--) {
+    const step = 4 * s; // whole logical pixels, and even sizes for guacd
+    const fw = Math.floor(w / step) * step;
+    const fh = Math.floor(h / step) * step;
+    if ((fw / s) * (fh / s) >= MIN_LOGICAL_AREA) return { scale: s, width: fw, height: fh, dpi };
+  }
+  return { scale: 1, width: w, height: h, dpi: 96 };
+}
 const run = promisify(execFile);
 async function setShareMode(mode, log) {
   try {
@@ -126,7 +150,7 @@ const BASE_PARAMS = {
   'enable-full-window-drag': 'true',
 };
 
-export function handleScreen(ws, req, { guacd, rdp }, log) {
+export function handleScreen(ws, req, { guacd, rdp, session }, log) {
   const url = new URL(req.url, 'http://localhost');
   const width = intParam(url.searchParams.get('width'), 1280, 320, 7680);
   const height = intParam(url.searchParams.get('height'), 720, 240, 4320);
@@ -141,27 +165,45 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
   const res = q.get('res') === 'auto' || SCALES.has(q.get('res')) ? q.get('res') : '1';
   const audio = q.get('audio') === '1';
   const minFrameMs = priority === 'data' ? DATA_SAVER_FRAME_MS : 0;
-  const virtual = q.get('source') === 'virtual';
-  // A virtual display is already the browser's size, so it never needs shrinking.
-  const reshape = (!virtual && res !== '1') || quality === 'low' || quality === 'medium';
+  const source = SOURCES.has(q.get('source')) ? q.get('source') : 'mirror';
+  // Extra monitors and the separate desktop are already the browser's size, so
+  // they never need shrinking.
+  const sized = source !== 'mirror';
+  const reshape = (!sized && res !== '1') || quality === 'low' || quality === 'medium';
+  const port = source === 'session' ? rdp.sessionPort : rdp.port;
+  // guacd turns the browser's device pixels into a desktop size using its "dpi"
+  // argument. An extra monitor is always made at CSS-pixel size (scale 1 on the
+  // main desktop is never changed); the separate desktop follows sessionLayout().
+  const layout = source === 'session' ? sessionLayout(width, height, dpi)
+    : source === 'virtual' ? { scale: 1, width, height, dpi: 96 }
+    : null;
 
   const params = {
     hostname: rdp.hostname,
-    port: String(rdp.port),
+    port: String(port),
     username: rdp.username,
     password: rdp.password,
     security: 'any',
     'ignore-cert': 'true',
     'disable-audio': audio ? 'false' : 'true',
-    ...(virtual ? { 'resize-method': 'display-update' } : {}),
+    ...(sized ? { 'resize-method': 'display-update', dpi: String(layout.dpi) } : {}),
     'server-layout': 'en-us-qwerty',
     timezone,
     ...BASE_PARAMS,
     ...(quality === 'lossless' ? { 'force-lossless': 'true' } : {}),
   };
 
-  setShareMode(virtual ? 'extend' : 'mirror-primary', log).then(() => {
+  const ready = source === 'session'
+    ? session.ensureRunning()
+    : setShareMode(source === 'virtual' ? 'extend' : 'mirror-primary', log);
+  ready.then(() => {
     if (ws.readyState === ws.OPEN) connect();
+  }, (err) => {
+    log(`screen: ${err.message}`);
+    if (ws.readyState === ws.OPEN) {
+      ws.send(encode(['error', `Could not start the separate desktop: ${err.message}`, String(STATUS_UPSTREAM_NOT_FOUND)]));
+      ws.close(1011, String(STATUS_UPSTREAM_NOT_FOUND));
+    }
   });
 
   function connect() {
@@ -170,10 +212,11 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
     const parser = new GuacParser();
     let handshakeDone = false;
     let lastSync = 0;
+    let heldSync = null;
     const toBrowser = (text) => { if (ws.readyState === ws.OPEN) ws.send(text); };
     const scaler = reshape
       ? createScaler({
-        scale: virtual ? 1 : res === 'auto' ? null : Number(res),
+        scale: sized ? 1 : res === 'auto' ? null : Number(res),
         target: { width, height },
         quality,
         send: toBrowser,
@@ -197,6 +240,20 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
 
     socket.setNoDelay(true);
 
+    // The separate desktop starts each monitor at scale 1; match this device's
+    // pixel density once the monitor has settled at a new size.
+    let scaleTimer;
+    const scaleSession = (w, h) => {
+      clearTimeout(scaleTimer);
+      scaleTimer = setTimeout(() => {
+        if (closed) return;
+        session.setScale(w, h, layout.scale).then(
+          (applied) => log(`screen: separate desktop ${w}x${h} at scale ${applied}`),
+          (err) => log(`screen: could not scale the separate desktop: ${err.message.split('\n').at(-2) || err.message}`),
+        );
+      }, 400);
+    };
+
     socket.on('connect', () => {
       socket.write(encode(['select', 'rdp']));
     });
@@ -217,7 +274,7 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
         const values = names.map((name) => (name.startsWith('VERSION_') ? name : params[name] ?? ''));
 
         socket.write(
-          encode(['size', width, height, dpi]) +
+          encode(['size', layout?.width ?? width, layout?.height ?? height, dpi]) +
             encode(['audio', ...(audio ? ['audio/L8', 'audio/L16'] : [])]) +
             encode(['video']) +
             encode(['image', 'image/png', 'image/jpeg', 'image/webp']) +
@@ -225,7 +282,7 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
             encode(['connect', ...values]),
         );
         handshakeDone = true;
-        log(`screen: connecting RDP ${rdp.hostname}:${rdp.port} (${virtual ? 'virtual display' : 'mirror'}, quality ${quality}, ${priority}, scale ${virtual ? 'n/a' : res}, browser ${width}x${height})`);
+        log(`screen: connecting RDP ${rdp.hostname}:${port} (${source}, quality ${quality}, ${priority}, scale ${sized ? 'n/a' : res}, browser ${width}x${height}${layout ? `, desktop ${layout.width}x${layout.height} at GNOME scale ${layout.scale}` : ''})`);
 
         // First message tells the browser tunnel its UUID and marks it open.
         ws.send(encode(['', randomUUID()]));
@@ -233,6 +290,10 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
       }
 
       if (!instructions.length) return;
+      if (source === 'session' && layout.scale > 1) {
+        const size = instructions.findLast((i) => i.elements[0] === 'size' && i.elements[1] === '0');
+        if (size) scaleSession(Number(size.elements[2]), Number(size.elements[3]));
+      }
       if (scaler) scaler.push(instructions);
       else toBrowser(instructions.map((i) => i.raw).join(''));
     });
@@ -253,15 +314,35 @@ export function handleScreen(ws, req, { guacd, rdp }, log) {
         return;
       }
       if (!handshakeDone || socket.destroyed) return;
-      // guacd sends the next frame only after the browser acknowledges the last
-      // one, so holding acknowledgements back caps the frame rate.
-      if (minFrameMs && msg.startsWith('4.sync,')) {
-        const wait = Math.max(0, lastSync + minFrameMs - Date.now());
-        lastSync = Date.now() + wait;
-        if (wait) {
-          setTimeout(() => { if (!socket.destroyed) socket.write(msg); }, wait);
+      // Resizes of a scaled separate desktop keep whole logical pixels.
+      if (layout?.scale > 1 && msg.startsWith('4.size,')) {
+        const m = /^4\.size,\d+\.(\d+),\d+\.(\d+);$/.exec(msg);
+        if (m) {
+          const step = 4 * layout.scale;
+          socket.write(encode(['size', Math.floor(m[1] / step) * step, Math.floor(m[2] / step) * step]));
           return;
         }
+      }
+      // guacd sends the next frame only after the browser acknowledges the last
+      // one, so holding acknowledgements back caps the frame rate. Only the
+      // newest held acknowledgement is sent: it covers every frame before it,
+      // and queueing each one would add the wait once per frame.
+      if (minFrameMs && msg.startsWith('4.sync,')) {
+        const wait = lastSync + minFrameMs - Date.now();
+        if (wait > 0) {
+          const pending = heldSync;
+          heldSync = msg;
+          if (pending === null) {
+            setTimeout(() => {
+              const latest = heldSync;
+              heldSync = null;
+              lastSync = Date.now();
+              if (latest && !socket.destroyed) socket.write(latest);
+            }, wait);
+          }
+          return;
+        }
+        lastSync = Date.now();
       }
       socket.write(scaler ? scaler.mapInput(msg) : msg);
     });

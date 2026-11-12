@@ -40,6 +40,9 @@ export const config = {
     port: Number(env.RDP_PORT || 3390),
     username: env.RDP_USERNAME || '',
     password: env.RDP_PASSWORD || '',
+    // The separate headless desktop (scripts/desktop-session.sh) uses the same credentials.
+    sessionPort: Number(env.RDP_SESSION_PORT || 3391),
+    sessionUnit: env.DESKPORT_SESSION_UNIT || 'deskport-session.service',
   },
 
   terminal: {

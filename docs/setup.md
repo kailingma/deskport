@@ -34,6 +34,7 @@ The script:
 3. Writes `rdp.env` (mode 600) with the username `deskport` and a random password.
 4. Points GNOME desktop sharing at those, on port 3390, with port negotiation and view-only mode off.
 5. Enables and restarts `gnome-remote-desktop.service` as a user service.
+6. Sets up the headless RDP settings the separate desktop uses (port 3391, same credentials). It writes them with `gsettings` rather than `grdctl --headless rdp enable`, because that command also starts `gnome-remote-desktop-headless.service`, which stops the desktop sharing from step 5.
 
 Port 3390 is used because GNOME's system-level remote login daemon may already hold 3389. Set `RDP_PORT` before running the script to choose another, and put the same value in `deskport.env`.
 
@@ -107,10 +108,11 @@ Fill in `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, and optionally `DESKPORT_ALLOW
 sudo loginctl enable-linger "$USER"
 ```
 
-`install-services.sh` writes two systemd user units into `~/.config/systemd/user/`, enables them and starts them:
+`install-services.sh` writes three systemd user units into `~/.config/systemd/user/`, and enables and starts the first two:
 
 - `deskport.service` runs `src/server.js` with the `node` on your `PATH` at install time. For fnm it uses the stable `default` alias path.
 - `deskport-tunnel.service` runs `cloudflared` with `~/.cloudflared/deskport.yml` (set `DESKPORT_TUNNEL_CONFIG` to use another file). It is skipped when that file does not exist.
+- `deskport-session.service` runs `scripts/desktop-session.sh`, the separate desktop. It is not enabled: deskport starts it the first time someone picks Show: Separate desktop, and it runs until ended from the settings (`systemctl --user stop deskport-session` does the same). It is capped at 3 GB of memory.
 
 Lingering lets user services start at boot without anyone logging in on a terminal. The GNOME session itself still needs a login (or automatic login) for there to be a screen to share.
 

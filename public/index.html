@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="deskport">
   <title>deskport</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -38,6 +38,8 @@
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
     <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3.5M8 7l4-4 4 4M7 10.5H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1"/></symbol>
   </svg>
 
   <header class="bar" id="bar">
@@ -59,6 +61,11 @@
     <div class="bar-end">
       <span class="badge" id="status" data-state="idle" role="status"><span class="dot"></span><span class="badge-text">Idle</span></span>
       <div class="tools screen-only">
+        <select class="select select-bar" id="quick-source" aria-label="Show" title="What the Screen view shows">
+          <option value="mirror">My monitor</option>
+          <option value="virtual">Extra monitor</option>
+          <option value="session">Separate desktop</option>
+        </select>
         <button class="btn-icon" data-action="clipboard" title="Send clipboard to the remote desktop" aria-label="Send clipboard">
           <svg class="icon"><use href="#i-clipboard"/></svg>
         </button>
@@ -114,10 +121,10 @@
 
   <nav class="tabbar" aria-label="View">
     <button class="tabbar-item" data-view="screen" aria-selected="true">
-      <svg class="icon"><use href="#i-monitor"/></svg><span>Screen</span>
+      <span class="tab-icon"><svg class="icon"><use href="#i-monitor"/></svg><span class="tab-dot" data-status-for="screen"></span></span><span>Screen</span>
     </button>
     <button class="tabbar-item" data-view="term" aria-selected="false">
-      <svg class="icon"><use href="#i-terminal"/></svg><span>Terminal</span>
+      <span class="tab-icon"><svg class="icon"><use href="#i-terminal"/></svg><span class="tab-dot" data-status-for="term"></span></span><span>Terminal</span>
     </button>
     <button class="tabbar-item" data-action="sheet">
       <svg class="icon"><use href="#i-more"/></svg><span>More</span>
@@ -126,6 +133,14 @@
 
   <dialog class="sheet" id="sheet" aria-labelledby="sheet-title">
     <div class="sheet-grabber" aria-hidden="true"></div>
+    <div class="screen-only">
+      <h2 class="sheet-title" id="sheet-source-title">Show</h2>
+      <div class="sheet-list" role="radiogroup" aria-labelledby="sheet-source-title" id="sheet-source">
+        <button class="sheet-item" role="radio" data-source="mirror"><svg class="icon check"><use href="#i-check"/></svg>My monitor</button>
+        <button class="sheet-item" role="radio" data-source="virtual"><svg class="icon check"><use href="#i-check"/></svg>Extra monitor</button>
+        <button class="sheet-item" role="radio" data-source="session"><svg class="icon check"><use href="#i-check"/></svg>Separate desktop</button>
+      </div>
+    </div>
     <h2 class="sheet-title" id="sheet-title">Actions</h2>
     <div class="sheet-list">
       <button class="sheet-item" data-action="keyboard"><svg class="icon"><use href="#i-keyboard"/></svg>Show keyboard</button>
@@ -135,8 +150,21 @@
       <button class="sheet-item" data-action="reconnect"><svg class="icon"><use href="#i-refresh"/></svg>Reconnect</button>
       <button class="sheet-item" data-action="settings"><svg class="icon"><use href="#i-sliders"/></svg>Settings</button>
       <button class="sheet-item fs-only-supported" data-action="fullscreen"><svg class="icon"><use href="#i-maximize"/></svg>Full screen</button>
+      <button class="sheet-item install-only" data-action="install"><svg class="icon"><use href="#i-maximize"/></svg>Full screen</button>
     </div>
     <button class="sheet-cancel" data-action="close-sheet">Cancel</button>
+  </dialog>
+
+  <dialog class="sheet" id="install" aria-labelledby="install-title">
+    <div class="sheet-grabber" aria-hidden="true"></div>
+    <h2 class="install-title" id="install-title">Use deskport without Safari's bars</h2>
+    <p class="install-body">Safari can't hide its address bar and toolbar for a web page. A Home Screen icon opens deskport on its own, using the whole screen.</p>
+    <ol class="install-steps">
+      <li>Tap <svg class="icon" aria-label="Share"><use href="#i-share"/></svg> Share in Safari's toolbar. It can be under the <strong>⋯</strong> button.</li>
+      <li>Tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li>
+      <li>Open deskport from the new icon. The first time, it asks you to sign in again.</li>
+    </ol>
+    <button class="sheet-cancel" data-action="close-install">Done</button>
   </dialog>
 
   <dialog class="settings" id="settings" aria-labelledby="settings-title">
@@ -160,13 +188,21 @@
       <section class="settings-group" aria-labelledby="sg-screen">
         <h3 id="sg-screen">Screen</h3>
         <div class="field">
-          <span class="field-label" id="lbl-source">Show</span>
-          <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-source" data-setting="source">
-            <button type="button" role="radio" data-value="mirror">My monitor</button>
-            <button type="button" role="radio" data-value="virtual">Virtual display</button>
-          </div>
+          <label class="field-label" for="set-source">Show</label>
+          <select class="select" id="set-source" data-setting="source" aria-describedby="source-help">
+            <option value="mirror">My monitor</option>
+            <option value="virtual">Extra monitor</option>
+            <option value="session">Separate desktop</option>
+          </select>
         </div>
         <p class="field-help" id="source-help"></p>
+        <div id="session-row" hidden>
+          <div class="field">
+            <span class="field-label">Separate desktop</span>
+            <button type="button" class="btn-text btn-outline" data-action="end-session" id="end-session">End it</button>
+          </div>
+          <p class="field-help" id="session-state"></p>
+        </div>
         <div class="field">
           <label class="field-label" for="set-resolution">Resolution</label>
           <select class="select" id="set-resolution" data-setting="resolution" aria-describedby="resolution-help">
@@ -183,14 +219,15 @@
           <input type="range" id="set-quality" min="0" max="3" step="1" data-setting="quality" aria-describedby="quality-help">
           <div class="range-labels" aria-hidden="true"><span>Low</span><span>Medium</span><span>High</span><span>Lossless</span></div>
         </div>
+        <p class="field-help" id="quality-help"></p>
         <div class="field">
           <span class="field-label" id="lbl-priority">Prioritize</span>
-          <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-priority" data-setting="priority">
+          <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-priority" aria-describedby="priority-help" data-setting="priority">
             <button type="button" role="radio" data-value="speed">Responsiveness</button>
             <button type="button" role="radio" data-value="data">Data use</button>
           </div>
         </div>
-        <p class="field-help" id="quality-help"></p>
+        <p class="field-help" id="priority-help"></p>
         <div class="field">
           <span class="field-label" id="lbl-scroll">Touch scrolling</span>
           <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-scroll" data-setting="touchScroll">
@@ -198,7 +235,7 @@
             <button type="button" role="radio" data-value="reversed">Reversed</button>
           </div>
         </div>
-        <p class="field-note">Screen changes apply when you close settings; the screen reconnects.</p>
+        <p class="field-note">The screen reconnects with these changes when you close settings.</p>
       </section>
 
       <section class="settings-group" aria-labelledby="sg-term">

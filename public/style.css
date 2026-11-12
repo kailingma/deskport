@@ -249,6 +249,10 @@ body[data-view="term"] .screen-only { display: none; }
   cursor: pointer;
 }
 .btn-primary:hover { filter: brightness(1.06); }
+.btn-outline { border-color: var(--border); color: var(--text); }
+
+.select-bar { min-width: 0; height: 32px; margin-right: 4px; font-size: 13px; font-weight: 500; }
+@media (pointer: coarse) { .select-bar { height: 40px; } }
 
 /* ---------- Full screen: the bar becomes a floating toolbar ---------- */
 
@@ -414,6 +418,17 @@ body.is-fullscreen .term-wrap { padding-top: 16px; }
 }
 .tabbar-item .icon { width: 22px; height: 22px; stroke-width: 1.6; }
 .tabbar-item[aria-selected="true"] { color: var(--primary); }
+.tab-icon { position: relative; display: grid; }
+.tab-dot {
+  position: absolute; top: -1px; right: -5px;
+  width: 8px; height: 8px;
+  border: 1.5px solid var(--surface);
+  border-radius: 50%;
+  box-sizing: content-box;
+  display: none;
+}
+.tab-dot[data-state="busy"] { display: block; background: var(--warn); animation: pulse 1.4s ease-in-out infinite; }
+.tab-dot[data-state="bad"] { display: block; background: var(--bad); }
 
 .sheet {
   width: min(480px, 100%);
@@ -452,6 +467,22 @@ body.is-fullscreen .term-wrap { padding-top: 16px; }
 .sheet-item:first-child { border-top: 0; }
 .sheet-item:active { background: var(--surface-2); }
 .sheet-item .icon { width: 20px; height: 20px; color: var(--text-2); }
+.sheet-list + .sheet-title, .screen-only + .sheet-title { margin-top: 16px; }
+.sheet-item .check { visibility: hidden; color: var(--primary); }
+.sheet-item[aria-checked="true"] .check { visibility: visible; }
+.sheet-item[aria-checked="true"] { font-weight: 600; }
+
+html:not(.can-install) .install-only { display: none !important; }
+.install-title { margin: 4px 4px 6px; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.install-body { margin: 0 4px 12px; color: var(--text-2); font-size: 15px; }
+.install-steps {
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 0 0 4px; padding: 14px 14px 14px 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  font-size: 15px;
+}
+.install-steps .icon { width: 18px; height: 18px; vertical-align: -3px; color: var(--primary); }
 .sheet-cancel {
   width: 100%;
   min-height: 48px;
@@ -465,15 +496,19 @@ body.is-fullscreen .term-wrap { padding-top: 16px; }
 
 html:not(.can-fullscreen) .fs-only-supported { display: none !important; }
 
-/* Phones: compact top bar, bottom tab bar, actions in a sheet. */
-@media (max-width: 640px) {
-  :root { --bar-h: 44px; }
-  .bar { grid-template-columns: 1fr auto; gap: 8px; padding-left: calc(12px + var(--safe-l)); padding-right: calc(12px + var(--safe-r)); }
-  .name { display: none; }
-  .host { padding-left: 0; border-left: 0; color: var(--text); font-weight: 600; }
-  .bar .segmented, .tools, .divider, .bar-end > [data-action="fullscreen"] { display: none; }
-  .badge { margin-right: 0; }
+/* Phones (portrait, or landscape on a touch screen): no top bar. The views use
+   the whole height, a bottom tab bar switches them, and actions live in a sheet.
+   From a Home Screen icon the page runs under the status bar, so the views start
+   below it and the strip behind it stays dark for the status bar's white text. */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
+  .bar, .bar-handle { display: none !important; }
+  main { background: var(--stage); }
+  .view { top: var(--safe-t); left: var(--safe-l); right: var(--safe-r); }
   .tabbar { display: flex; }
+}
+@media (pointer: coarse) and (max-height: 500px) {
+  :root { --tabbar-h: 44px; }
+  .tabbar-item { flex-direction: row; gap: 8px; font-size: 13px; }
 }
 
 /* Touch devices get the key row whenever a keyboard is up, and always in the terminal on phones. */
@@ -611,7 +646,7 @@ input[type="range"] {
 .switch:checked { background: var(--primary); }
 .switch:checked::after { transform: translateX(16px); }
 
-@media (max-width: 640px) {
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
   .settings {
     width: 100%;
     max-width: 100%;

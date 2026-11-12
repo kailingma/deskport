@@ -4,7 +4,8 @@
   "description": "This computer's screen and terminal in the browser.",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
   "background_color": "#111111",
   "theme_color": "#111111",
   "icons": [

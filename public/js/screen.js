@@ -320,10 +320,11 @@ export function createScreen({ wsBase, setStatus, toast }) {
     keyboard.onkeyup = (keysym) => { client?.sendKeyEvent(0, keysym); };
 
     // Device pixels to fill. On touch screens leave room to pinch-zoom 2x and stay
-    // sharp, except on a virtual display, which is made at exactly this size.
+    // sharp, except for an extra monitor or separate desktop, which GNOME makes
+    // at exactly this size.
     const ratio = window.devicePixelRatio || 1;
-    const virtual = settings.get('source') === 'virtual';
-    const headroom = !virtual && matchMedia('(pointer: coarse)').matches ? 2 : 1;
+    const sized = settings.get('source') !== 'mirror';
+    const headroom = !sized && matchMedia('(pointer: coarse)').matches ? 2 : 1;
     const params = new URLSearchParams({
       width: String(Math.round(wrap.clientWidth * ratio * headroom)),
       height: String(Math.round(wrap.clientHeight * ratio * headroom)),
@@ -394,11 +395,12 @@ export function createScreen({ wsBase, setStatus, toast }) {
     toast(`Sent ${text.length} characters. Paste with Ctrl+V on the remote desktop`);
   }
 
-  // On a virtual display, ask GNOME to resize it when this window changes size or rotates.
+  // For an extra monitor or separate desktop, ask GNOME to resize it when this
+  // window changes size or the device rotates.
   let resizeTimer;
   new ResizeObserver(() => {
     rescale();
-    if (!client || settings.get('source') !== 'virtual') return;
+    if (!client || settings.get('source') === 'mirror') return;
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const ratio = window.devicePixelRatio || 1;
