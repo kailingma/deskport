@@ -83,7 +83,7 @@ app.use('/h/:hostId', (req, res, next) => {
   next();
 }, api);
 
-if (config.ui) app.use(createUi({ root, dev: config.insecureDev }));
+if (config.ui) app.use(createUi({ root, dev: config.insecureDev, log }));
 
 app.use((err, req, res, _next) => {
   log(`error: ${err.stack || err}`);
@@ -99,10 +99,15 @@ const screenWss = new WebSocketServer({
   perMessageDeflate: { threshold: 1024, zlibDeflateOptions: { level: 1 }, serverNoContextTakeover: true, clientNoContextTakeover: true },
   handleProtocols: (protocols) => (protocols.has('guacamole') ? 'guacamole' : false),
 });
-const termWss = new WebSocketServer({ noServer: true });
+// Terminal output is repetitive text; keeping the deflate context across
+// messages lets a redraw refer back to earlier ones.
+const termWss = new WebSocketServer({
+  noServer: true,
+  perMessageDeflate: { threshold: 64, zlibDeflateOptions: { level: 6, memLevel: 8 } },
+});
 const endpoints = {
   '/ws/screen': { wss: screenWss, open: (ws, req) => handleScreen(ws, req, { ...config, session, monitors }, log) },
-  '/ws/term': { wss: termWss, open: (ws) => handleTerminal(ws, config.terminal, log) },
+  '/ws/term': { wss: termWss, open: (ws, req) => handleTerminal(ws, req, config.terminal, log) },
 };
 
 function reject(socket, status, text) {

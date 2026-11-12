@@ -92,7 +92,9 @@ function intParam(value, fallback, min, max) {
 // the picture itself:
 //   quality   low | medium | high | lossless. Low and medium re-encode guacd's
 //             images as WebP at quality 35 / 60 (see scaler.js); lossless makes
-//             guacd send only lossless images.
+//             guacd send only lossless images. At high and lossless, guacd's
+//             PNGs are re-encoded as lossless WebP (same pixels, about a
+//             quarter smaller) unless DESKPORT_LOSSLESS_WEBP=0.
 //   priority  speed sends every frame; data paces frame acknowledgements so
 //             guacd sends about 10 frames per second.
 //   res       auto | 1 | 0.75 | 0.5 | 0.33. Below 1, scaler.js shrinks the picture;
@@ -102,6 +104,7 @@ const SCALES = new Set(['1', '0.75', '0.5', '0.33']);
 const DATA_SAVER_FRAME_MS = 100;
 // Frames the bridge acknowledges ahead of the browser at Responsiveness (pacing.js); 0 turns it off.
 const ACK_AHEAD = Number(process.env.DESKPORT_ACK_AHEAD ?? 2);
+const LOSSLESS_WEBP = process.env.DESKPORT_LOSSLESS_WEBP !== '0';
 
 // Screen source:
 //   mirror   the physical monitor (GNOME desktop sharing in mirror-primary mode).
@@ -225,7 +228,7 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors }, log) {
   // Extra monitors and the separate desktop are already the browser's size, so
   // they never need shrinking.
   const sized = source !== 'mirror';
-  const reshape = (!sized && res !== '1') || quality === 'low' || quality === 'medium';
+  const reshape = LOSSLESS_WEBP || (!sized && res !== '1') || quality === 'low' || quality === 'medium';
   const port = source === 'session' ? rdp.sessionPort : rdp.port;
   // guacd turns the browser's device pixels into a desktop size using its "dpi"
   // argument. An extra monitor is always made at CSS-pixel size (scale 1 on the

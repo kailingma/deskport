@@ -8,10 +8,17 @@ import { encode } from './guac.js';
 // size a client asks for. Instead of changing the monitor, every coordinate in
 // drawing instructions is multiplied by `scale`, every image is resized and
 // re-encoded at the requested quality, and mouse input from the browser is
-// divided by `scale` on the way back.
+// divided by `scale` on the way back. At full size, high and lossless quality
+// re-encode only guacd's PNGs, as lossless WebP.
 
 const LOSSY_QUALITY = { low: 35, medium: 60, high: 82 };
 const BLOB_CHUNK = 8064; // base64 characters per blob, the size guacd uses
+// Lossless WebP: on captured desktop updates it came out at 76% of guacd's PNG
+// size with effort 1 for images up to this many pixels and effort 0 above
+// (slowest image 26 ms). Effort 1 on a full 4K image took 400 ms, effort 0 180 ms.
+const LOSSLESS_EFFORT1_MAX_PX = 65536;
+// At full size only image streams are rewritten.
+const IMAGE_OPS = new Set(['img', 'blob', 'end']);
 
 /**
  * @param {object} opts
@@ -23,8 +30,9 @@ const BLOB_CHUNK = 8064; // base64 characters per blob, the size guacd uses
  */
 export function createScaler({ scale, target, quality, send, log }) {
   let s = scale; // null until the desktop size is known (auto)
-  // At full size with high or lossless quality, guacd's own images are already right.
-  const passthrough = () => s === 1 && (quality === 'high' || quality === 'lossless');
+  // At full size with high or lossless quality, guacd's lossy images are kept
+  // as they are and only its PNGs are re-encoded, as lossless WebP.
+  const keepLossy = () => s === 1 && (quality === 'high' || quality === 'lossless');
   const holding = []; // instructions received before `s` is known
   const streams = new Map(); // image streams being collected, by stream index
   const queue = []; // strings and promises of strings, in output order
@@ -62,7 +70,12 @@ export function createScaler({ scale, target, quality, send, log }) {
     flush();
   };
 
-  async function renderImage({ index, mask, layer, x, y, chunks }) {
+  async function renderImage({ index, mask, layer, mimetype, x, y, chunks }) {
+    const original = () => {
+      let out = encode(['img', index, mask, layer, mimetype, x, y]);
+      for (const c of chunks) out += encode(['blob', index, c]);
+      return out + encode(['end', index]);
+    };
     try {
       const input = Buffer.from(chunks.join(''), 'base64');
       const meta = await sharp(input).metadata();
@@ -73,16 +86,21 @@ export function createScaler({ scale, target, quality, send, log }) {
       let img = sharp(input);
       if (s !== 1) img = img.resize(w, h, { fit: 'fill', kernel: s < 0.6 ? 'mitchell' : 'cubic' });
       let mime;
-      if (quality === 'lossless') {
-        img = img.png({ compressionLevel: 2 });
-        mime = 'image/png';
+      // Lossless output, and guacd's own PNGs at full size: same pixels, fewer bytes.
+      const lossless = quality === 'lossless' || (keepLossy() && mimetype === 'image/png');
+      if (lossless) {
+        img = img.webp({ lossless: true, effort: w * h <= LOSSLESS_EFFORT1_MAX_PX ? 1 : 0 });
+        mime = 'image/webp';
       } else {
         // WebP: on desktop text it came out 15% smaller than JPEG at quality 60
         // and 39% smaller than 4:4:4 JPEG at 82, for about 20% more encoding time.
         img = img.webp({ quality: LOSSY_QUALITY[quality], alphaQuality: 90, effort: 0 });
         mime = 'image/webp';
       }
-      const data = (await img.toBuffer()).toString('base64');
+      const encoded = await img.toBuffer();
+      // At full size a re-encoded image that came out larger is sent as it was.
+      if (s === 1 && encoded.length >= input.length) return original();
+      const data = encoded.toString('base64');
 
       let out = encode(['img', index, mask, layer, mime, x2, y2]);
       for (let i = 0; i < data.length; i += BLOB_CHUNK) out += encode(['blob', index, data.slice(i, i + BLOB_CHUNK)]);
@@ -99,7 +117,8 @@ export function createScaler({ scale, target, quality, send, log }) {
     switch (op) {
       case 'img': {
         if (!/^image\//.test(e[4])) return raw;
-        streams.set(e[1], { index: e[1], mask: e[2], layer: e[3], x: e[5], y: e[6], chunks: [] });
+        if (keepLossy() && e[4] !== 'image/png') return raw;
+        streams.set(e[1], { index: e[1], mask: e[2], layer: e[3], mimetype: e[4], x: e[5], y: e[6], chunks: [] });
         return '';
       }
       case 'blob': {
@@ -166,7 +185,7 @@ export function createScaler({ scale, target, quality, send, log }) {
         return;
       }
     }
-    const out = passthrough() ? instruction.raw : rewrite(instruction);
+    const out = s === 1 && !IMAGE_OPS.has(instruction.elements[0]) ? instruction.raw : rewrite(instruction);
     if (out) emit(out);
   }
 

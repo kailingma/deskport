@@ -1,6 +1,7 @@
 import { Terminal } from '/vendor/xterm.mjs';
 import { FitAddon } from '/vendor/addon-fit.mjs';
 import { WebLinksAddon } from '/vendor/addon-web-links.mjs';
+import { WebglAddon } from '/vendor/addon-webgl.mjs';
 import { settings } from './settings.js';
 import { TERMINAL_THEMES, TERMINAL_FONTS } from './themes.js';
 import { TERM_SEQ, takeMods } from './keys.js';
@@ -8,6 +9,14 @@ import { createScroller } from './gestures.js';
 
 const LONG_PRESS_MS = 450;
 const MOVE_SLOP = 10;
+// Drawn output is acknowledged in batches of this many characters, or after
+// ACK_MS, so the server can keep at most its window of output in flight.
+const ACK_CHARS = 16384;
+const ACK_MS = 50;
+// A ping while the page is visible; no message at all within PONG_MS means the
+// connection is dead (phones drop sockets silently in the background).
+const PING_MS = 15000;
+const PONG_MS = 5000;
 
 /**
  * The Terminal view: xterm.js attached to tmux over a WebSocket.
@@ -40,6 +49,7 @@ export function createTerminal({ host, setStatus }) {
   let ws = null;
   let retry = 0;
   let retryTimer = null;
+  let webgl = null;
 
   const send = (msg) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
 
@@ -169,38 +179,126 @@ export function createTerminal({ host, setStatus }) {
 
   // ---------- connection ----------
 
+  // GPU drawing: much faster than the DOM renderer for full-screen redraws.
+  // Falls back to the DOM renderer if WebGL is unavailable or its context is
+  // lost (iOS drops it in the background); it is tried again when visible.
+  function useWebgl() {
+    if (webgl || !opened) return;
+    try {
+      webgl = new WebglAddon();
+      webgl.onContextLoss(() => { webgl?.dispose(); webgl = null; });
+      xterm.loadAddon(webgl);
+    } catch {
+      webgl = null;
+    }
+  }
+
+  let unacked = 0;
+  let ackTimer = null;
+  let pingTimer = null;
+  let pongTimer = null;
+  let pingId = 0;
+
+  function ack() {
+    clearTimeout(ackTimer);
+    ackTimer = null;
+    if (unacked) send({ type: 'ack', chars: unacked });
+    unacked = 0;
+  }
+
+  function onOutput(data) {
+    xterm.write(data, () => {
+      unacked += data.length;
+      if (unacked >= ACK_CHARS) ack();
+      else if (!ackTimer) ackTimer = setTimeout(ack, ACK_MS);
+    });
+  }
+
+  // Sends a ping and reconnects if nothing at all arrives within PONG_MS.
+  function checkAlive() {
+    if (ws?.readyState !== WebSocket.OPEN || pongTimer) return;
+    send({ type: 'ping', id: ++pingId });
+    const socket = ws;
+    pongTimer = setTimeout(() => {
+      pongTimer = null;
+      if (ws === socket) reconnect();
+    }, PONG_MS);
+  }
+
+  function stopTimers() {
+    clearTimeout(ackTimer);
+    clearTimeout(pongTimer);
+    clearInterval(pingTimer);
+    ackTimer = pongTimer = pingTimer = null;
+    unacked = 0;
+  }
+
   function connect() {
     clearTimeout(retryTimer);
+    retryTimer = null;
     if (!opened) {
       xterm.open(box);
       opened = true;
       xterm.onData(input);
       new ResizeObserver(() => fit()).observe(el);
+      useWebgl();
       applyFont();
     }
+    stopTimers();
     setStatus('term', 'busy', 'Connecting');
-    ws = new WebSocket(host.ws('/ws/term'));
-    ws.onopen = () => {
+    const socket = new WebSocket(host.ws('/ws/term?flow=1'));
+    socket.binaryType = 'arraybuffer';
+    ws = socket;
+    socket.onopen = () => {
       retry = 0;
       setStatus('term', 'ok', 'Connected');
       fit();
+      pingTimer = setInterval(() => { if (!document.hidden) checkAlive(); }, PING_MS);
     };
-    ws.onmessage = (e) => xterm.write(typeof e.data === 'string' ? e.data : new Uint8Array(e.data));
-    ws.onclose = () => {
+    socket.onmessage = (e) => {
+      clearTimeout(pongTimer);
+      pongTimer = null;
+      // Text frames are terminal output; binary frames are replies to pings.
+      if (typeof e.data === 'string') onOutput(e.data);
+    };
+    socket.onclose = () => {
+      if (ws !== socket) return;
       ws = null;
-      const delay = Math.min(10000, 500 * 2 ** retry++);
-      setStatus('term', 'bad', `Reconnecting in ${Math.max(1, Math.round(delay / 1000))}s`);
+      stopTimers();
+      // The first retry is immediate; later ones back off up to 10 s.
+      const delay = retry ? Math.min(10000, 250 * 2 ** retry) : 0;
+      retry++;
+      setStatus('term', 'bad', delay ? `Reconnecting in ${Math.max(1, Math.round(delay / 1000))}s` : 'Reconnecting');
       retryTimer = setTimeout(connect, delay);
     };
   }
 
+  function reconnect() {
+    if (ws) {
+      const old = ws;
+      ws = null;
+      old.onclose = null;
+      old.close();
+    }
+    retry = 0;
+    connect();
+  }
+
+  // Back from the background or the network: check the connection now, and
+  // skip the rest of a reconnect backoff.
+  function wake() {
+    if (document.hidden || !opened) return;
+    useWebgl();
+    if (ws) checkAlive();
+    else if (retryTimer) { retry = 0; connect(); }
+  }
+  document.addEventListener('visibilitychange', wake);
+  window.addEventListener('online', wake);
+  window.addEventListener('pageshow', wake);
+
   return {
     ensureConnected() { if (!ws) connect(); },
-    reconnect() {
-      if (ws) { ws.onclose = null; ws.close(); ws = null; }
-      retry = 0;
-      connect();
-    },
+    reconnect,
     focus() { xterm.focus(); },
     key(name) { input(TERM_SEQ[name] ?? name); },
     fit,

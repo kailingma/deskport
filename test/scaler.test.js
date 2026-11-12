@@ -49,3 +49,25 @@ test('maps browser mouse coordinates back to desktop pixels', async () => {
   assert.equal(scaler.mapInput(encode(['mouse', '10', '21', '1'])), encode(['mouse', '20', '42', '1']));
   assert.equal(scaler.mapInput(encode(['key', '65', '1'])), encode(['key', '65', '1']));
 });
+
+test('at full size, PNGs become lossless WebP with the same pixels and lossy images pass through', async () => {
+  // Text-like content: PNG and WebP both compress it, WebP further.
+  const raw = Buffer.alloc(120 * 40 * 3);
+  for (let i = 0; i < raw.length; i += 3) raw[i] = raw[i + 1] = raw[i + 2] = ((i / 3) % 7 < 2 || (i / 360) % 5 < 1) ? 230 : 30;
+  const png = await sharp(raw, { raw: { width: 120, height: 40, channels: 3 } }).png().toBuffer();
+  const jpeg = 'abc'; // never decoded: lossy images are passed on untouched
+  const { out } = await run({ scale: 1, quality: 'high' },
+    encode(['size', '0', '1000', '1000'])
+    + encode(['img', '1', '14', '0', 'image/png', '7', '9']) + encode(['blob', '1', png.toString('base64')]) + encode(['end', '1'])
+    + encode(['img', '2', '14', '0', 'image/jpeg', '0', '0']) + encode(['blob', '2', jpeg]) + encode(['end', '2'])
+    + encode(['rect', '0', '1', '2', '3', '4']));
+  const imgs = out.filter((e) => e[0] === 'img');
+  assert.deepEqual(imgs, [['img', '1', '14', '0', 'image/webp', '7', '9'], ['img', '2', '14', '0', 'image/jpeg', '0', '0']]);
+  const blobs = out.filter((e) => e[0] === 'blob');
+  const webp = Buffer.from(blobs[0][2], 'base64');
+  assert.ok(webp.length < png.length, `webp ${webp.length} vs png ${png.length}`);
+  const a = await sharp(webp).removeAlpha().raw().toBuffer();
+  assert.deepEqual(a, raw);
+  assert.deepEqual(blobs[1], ['blob', '2', jpeg]);
+  assert.deepEqual(out.at(-1), ['rect', '0', '1', '2', '3', '4']);
+});

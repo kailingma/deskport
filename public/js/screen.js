@@ -20,6 +20,10 @@ const MOVE_SLOP = 10;
  *   long press, release      right click
  *   two-finger tap           right click
  */
+const RECEIVE_TIMEOUT_MS = 8000;
+const MAX_DROPS = 5;
+const STABLE_MS = 10000;
+
 export function createScreen({ host, setStatus, toast }) {
   const wrap = $('display-wrap');
   const ime = $('screen-ime');
@@ -30,6 +34,9 @@ export function createScreen({ host, setStatus, toast }) {
   let wantConnected = false;
   let zoom = 1; // relative to fit-to-window
   let stale = false; // settings changed while another view was showing
+  let drops = 0; // connections lost in a row without staying up
+  let dropTimer = null;
+  let waitingForWake = false;
 
   const overlay = (title, body) => {
     $('screen-overlay-title').textContent = title;
@@ -277,7 +284,25 @@ export function createScreen({ host, setStatus, toast }) {
 
   // ---------- connection ----------
 
+  // A lost connection is retried at once, then after 1, 2, 4 and 8 s; while the
+  // page is in the background it waits until it is shown again.
+  function reconnectSoon() {
+    setStatus('screen', 'busy', 'Reconnecting');
+    if (document.hidden) { waitingForWake = true; return; }
+    const delay = drops ? 1000 * 2 ** (drops - 1) : 0;
+    drops++;
+    dropTimer = setTimeout(connect, delay);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !waitingForWake) return;
+    waitingForWake = false;
+    reconnectSoon();
+  });
+
   function connect() {
+    clearTimeout(dropTimer);
+    waitingForWake = false;
     disconnect();
     wantConnected = true;
     stale = false;
@@ -285,7 +310,22 @@ export function createScreen({ host, setStatus, toast }) {
     $('screen-overlay').hidden = true;
 
     const tunnel = new Guacamole.WebSocketTunnel(host.ws('/ws/screen'));
+    // The tunnel pings every 500 ms; nothing back for this long means the link is gone.
+    tunnel.receiveTimeout = RECEIVE_TIMEOUT_MS;
+    // The tunnel reports a lost or failed connection here; the server's own
+    // errors (nobody signed in, guacd down) arrive as error instructions instead.
+    let lostLink = false;
+    tunnel.onerror = () => { lostLink = true; };
     const c = new Guacamole.Client(tunnel);
+    // Guacamole.Client does not watch the tunnel, so a socket that dies or closes
+    // would leave the last picture up, marked connected.
+    tunnel.onstatechange = (state) => {
+      if (state !== Guacamole.Tunnel.State.CLOSED || client !== c || !wantConnected) return;
+      if (lostLink && drops < MAX_DROPS) return reconnectSoon();
+      wantConnected = false;
+      setStatus('screen', 'bad', 'Disconnected');
+      overlay('Disconnected', lostLink ? 'The connection to the computer was lost.' : 'The remote desktop session ended.');
+    };
     client = c;
     const display = c.getDisplay();
     const el = display.getElement();
@@ -296,6 +336,7 @@ export function createScreen({ host, setStatus, toast }) {
         case 1: case 2: setStatus('screen', 'busy', 'Connecting'); break;
         case 3:
           setStatus('screen', 'ok', 'Connected');
+          setTimeout(() => { if (client === c) drops = 0; }, STABLE_MS);
           // GNOME desktop sharing can accept a session and then send no picture.
           setTimeout(() => {
             if (client === c && wantConnected && !c.getDisplay().getWidth()) {
@@ -454,7 +495,7 @@ export function createScreen({ host, setStatus, toast }) {
   return {
     ensureConnected() { if (!client || stale) connect(); },
     markStale() { stale = true; },
-    reconnect: connect,
+    reconnect() { drops = 0; connect(); },
     focus() { wrap.focus({ preventScroll: true }); },
     releaseKeys() { keyboard?.reset(); },
     showKeyboard() { ime.focus({ preventScroll: true }); },

@@ -16,14 +16,14 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | `src/auth.js` | Verifies the Cloudflare Access JWT, and checks WebSocket `Origin`. |
 | `src/server.js` | Starts one host: authentication, security headers, and wiring of the API, the UI and the WebSocket upgrade router (by host and endpoint). |
 | `src/api.js` | The JSON API of one host: `/api/me`, `/api/host`, `/api/hosts`, `/api/session`, `/api/session/stop`. |
-| `src/ui.js` | The page, its assets under `/v/<content hash>/` (so browsers never mix old and new files), and `/vendor/*`. Not mounted when `DESKPORT_UI=0`. |
+| `src/ui.js` | The page, and every file it loads (its own and the vendored libraries) from memory under `/v/<content hash>/`, precompressed. Not mounted when `DESKPORT_UI=0`. |
 | `src/hosts.js` | This host's identity, the list of other hosts, and `/h/<id>/` path routing (multi-host groundwork, see [multi-host.md](multi-host.md)). |
 | `src/guac.js` | Guacamole protocol encoder and parser, and the bridge between a browser WebSocket and a guacd TCP connection. |
 | `src/scaler.js` | Shrinks and re-encodes the screen stream for the Resolution and Quality settings. |
 | `src/session.js` | Starts, checks and stops the separate desktop's systemd unit, and sets its monitor scale. |
 | `src/monitors.js` | Lists the physical monitors, and for My monitor changes the monitor's mode to fit the viewer and the primary monitor while connected, then puts the configuration back. |
 | `src/pacing.js` | Acknowledges frames to guacd ahead of the browser at Responsiveness. |
-| `src/terminal.js` | Attaches a WebSocket to tmux through a pseudo-terminal. |
+| `src/terminal.js` | Attaches a WebSocket to tmux through a pseudo-terminal, with output batching and flow control. |
 | `public/app.js` | Entry point: views, full screen and the floating toolbar, settings dialog, key row, viewport handling. |
 | `public/js/screen.js` | Screen view: Guacamole client, scaling and zoom, touch gestures, soft keyboard. |
 | `public/js/terminal.js` | Terminal view: xterm.js, reconnects, touch scrolling and selection, appearance settings. |
@@ -31,13 +31,17 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | `public/js/dialog.js` | The confirmation dialog. |
 | `public/js/settings.js`, `themes.js`, `keys.js`, `gestures.js` | Per-device settings store, terminal colour schemes and fonts, key codes and sticky modifiers, scroll momentum. |
 | `public/` (rest) | `index.html`, `style.css`, `theme-init.js` (applies a saved light/dark choice before first paint), icons, manifest. No build step. |
-| `scripts/` | `setup-rdp.sh`, `install-services.sh`, `desktop-session.sh` (the separate desktop), `session-scale.py` (sets its monitor scale), `session-systemd-proxy.py` (systemd on its private bus), `monitor-config.py` (reads and applies Mutter's monitor configuration), `make-icons.mjs`, `measure-screen.mjs`, `measure-typing.mjs` (`LINK_KBPS` simulates a slow link), `measure-clear.mjs`. |
+| `scripts/` | `setup-rdp.sh`, `install-services.sh`, `desktop-session.sh` (the separate desktop), `session-scale.py` (sets its monitor scale), `session-systemd-proxy.py` (systemd on its private bus), `monitor-config.py` (reads and applies Mutter's monitor configuration), `make-icons.mjs`, `measure-screen.mjs`, `measure-typing.mjs` (`LINK_KBPS` simulates a slow link), `measure-clear.mjs`, `measure-terminal.mjs` (Terminal echo and Ctrl+C during a flood, over a simulated slow link). |
 | `deploy/` | guacd compose file and the cloudflared config example. |
-| `test/` | `node --test` tests for the protocol parser, the scaler, the separate desktop's size and scale, and the host registry. |
+| `test/` | `node --test` tests for the protocol parser, the scaler, the separate desktop's size and scale, the host registry and the page's asset serving. |
 
 ## Hosts and paths
 
 Every endpoint can be addressed two ways: directly (`/api/host`, `/ws/screen`) or by host id (`/h/<id>/api/host`, `/h/<id>/ws/screen`). The id `local` and this host's own id (`DESKPORT_HOST_ID`, default the hostname as a slug) both mean this host. Ids listed in `hosts.json` get 501 Not Implemented, and other ids 404. This is the groundwork for one UI controlling several machines; [multi-host.md](multi-host.md) has the design.
+
+## Page loading
+
+`src/ui.js` reads every file under `public/` and the vendored libraries into memory at start, hashes them together, and serves them under `/v/<hash>/` with `Cache-Control: immutable` for a year, as brotli or gzip when the browser accepts it (compressed in the background about a second after start). Absolute `/vendor/` references in scripts, styles and the page are rewritten to the versioned path. The page (`/`) is `no-cache` and lists every script as a `modulepreload`, so a load is the page's round trip plus one for all files at once, and a repeat load only revalidates the page. A file asked for under an older hash is served from the current set, uncached. The dev server rebuilds the set on every request and caches nothing.
 
 ## Authentication
 
@@ -73,9 +77,9 @@ The browser passes three picture settings in the query string: `res` (`auto`, `1
 - `quality=lossless` sets guacd's `force-lossless`.
 - `priority=speed` acknowledges each frame to guacd as soon as it is handed to the browser's socket, up to two frames ahead of the browser and while under 256 KB is waiting there (`src/pacing.js`). guacd holds frames back when an acknowledgement comes back later than usual, which a large frame on a slow link causes. The browser's own acknowledgements for frames already acknowledged are dropped.
 - `priority=data` caps the frame rate at 10 fps. guacd sends the next frame only after the browser acknowledges the previous one with a `sync` instruction, so the bridge holds acknowledgements back until 100 ms have passed since the last one it forwarded. While one is held, newer ones replace it, and only the newest is sent: it covers every earlier frame. (Queueing each held acknowledgement 100 ms behind the previous one built up seconds of delay during bursts such as typing.)
-- When `res` is below 1, or quality is `low` or `medium`, the bridge passes guacd's output through `src/scaler.js`:
+- Every stream passes through `src/scaler.js` (unless `DESKPORT_LOSSLESS_WEBP=0` and nothing below needs it). At full size with quality `high` or `lossless`, it only re-encodes guacd's PNGs as lossless WebP (the same pixels, about a quarter smaller; effort 1 up to 65,536 pixels, effort 0 above) and passes guacd's lossy images through. An image that comes out larger is sent as it was. When `res` is below 1, or quality is `low` or `medium`:
   - Every coordinate in drawing instructions (`size`, `rect`, `copy`, `transfer`, `cursor`, `mouse`, `move`, path instructions) is multiplied by the scale. Spans are mapped edge by edge, so adjacent rectangles stay adjacent after rounding.
-  - Each image stream (`img`, `blob`, `end`) is collected, resized with sharp (libvips), re-encoded (WebP at quality 35, 60 or 82; PNG for lossless), and emitted where the original `end` was. Output stays in order because a queue waits on each image before sending what follows it.
+  - Each image stream (`img`, `blob`, `end`) is collected, resized with sharp (libvips), re-encoded (WebP at quality 35, 60 or 82; lossless WebP for lossless), and emitted where the original `end` was. Output stays in order because a queue waits on each image before sending what follows it.
   - Mouse instructions from the browser are divided by the scale on the way back.
   - For `auto`, the scale is chosen when guacd reports the desktop size: the largest picture that fits the browser's device pixels (twice that on touch screens, for pinch-zoom headroom). Output is held until then.
   - Moved regions (`copy`) are rounded to whole pixels at the smaller size, so a scrolled area can sit up to half a pixel off until it is redrawn.
@@ -107,6 +111,8 @@ GNOME creates each client's monitor at scale 1, which is tiny on a phone. `sessi
 
 `GET /api/session` reports the unit's state and memory; `POST /api/session/stop` (same-origin only) stops it.
 
+In the browser, the tunnel's receive timeout is 8 s (Guacamole pings every 500 ms). `Guacamole.Client` does not watch its tunnel, so `public/js/screen.js` does: a lost connection is retried at once, then after 1, 2, 4 and 8 s (the count resets after 10 s connected), and in the background it waits until the page is shown. A connection the server closes normally, or five failed tries, show the Disconnected card. Errors the server sends (nobody signed in, guacd unreachable) are shown and not retried.
+
 Audio is not requested. The screen WebSocket uses permessage-deflate at zlib level 1: the images travel as base64, and compression wins back most of that overhead. The credentials never reach the browser.
 
 GNOME's mirror mode always streams the monitor at its native size. An earlier version switched the physical monitor to a lower mode during sessions; on a monitor connected to two GPUs that left one output unable to draw until the user logged out, so that code was removed.
@@ -115,7 +121,15 @@ GNOME's mirror mode always streams the monitor at its native size. An earlier ve
 
 `handleTerminal()` spawns `tmux new-session -A -s web -c ~` in a pseudo-terminal: it attaches to the session if it exists and creates it otherwise. The child environment has every `RDP_*`, `CF_ACCESS_*`, `DESKPORT_*` and `GUACD_*` variable removed so secrets do not leak into the shell.
 
-Messages from the browser are JSON, `{"type":"input","data":"..."}` or `{"type":"resize","cols":N,"rows":N}` (clamped). Output goes back as text frames. Closing the socket kills the tmux client only; the session and its programs keep running, and the browser reconnects with exponential backoff (0.5 s up to 10 s).
+Messages from the browser are JSON, `{"type":"input","data":"..."}` or `{"type":"resize","cols":N,"rows":N}` (clamped). Output goes back as text frames, compressed with permessage-deflate (level 6, context kept across messages). Output that arrives within 4 ms of the last send is batched into one message; the first chunk after a pause, such as a keystroke's echo, goes out at once.
+
+The page connects with `?flow=1`, which turns on flow control. Once xterm has drawn output, the page acknowledges it (`{"type":"ack","chars":N}`, in batches of 16 K characters or after 50 ms). When more than 128 K characters (`DESKPORT_TERM_WINDOW`) are unacknowledged, the bridge stops reading the pseudo-terminal until half of that is acknowledged. tmux then sees a slow client, skips the output in between and redraws the screen. Cloudflare's edge buffers without limit, so the server's own socket buffer cannot show a slow phone; the acknowledgements can.
+
+With `?flow=1`, the page also sends `{"type":"ping","id":N}` every 15 s while visible and right after it becomes visible or comes back online; the bridge answers with a binary frame. If nothing at all arrives within 5 s, the page reconnects. The server sends WebSocket pings every 25 s so idle connections stay open through proxies.
+
+Closing the socket kills the tmux client only; the session and its programs keep running. The browser reconnects at once, then with backoff (0.5 s up to 10 s), and skips the rest of a wait when the page becomes visible or the network returns.
+
+xterm draws with its WebGL renderer, and falls back to the DOM renderer if WebGL is missing or its context is lost (iOS drops it in the background); WebGL is tried again when the page is shown.
 
 ## Processes on the host
 

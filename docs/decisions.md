@@ -2,6 +2,20 @@
 
 Choices made while building deskport, newest first, with the reason for each. Entries marked *autonomous* were made while the owner was away and asked for choices to be made and logged.
 
+## 2026-11-12
+
+### Speed on slow links and through the tunnel
+The owner asked for the fastest experience on slow connections and through Cloudflare, the terminal included, with as few compromises as possible. Measured with `scripts/measure-terminal.mjs` (a proxy that delays each direction by half the round trip, limits the download rate and buffers without limit, as Cloudflare's edge does) and `scripts/measure-clear.mjs`.
+
+- **Terminal compression.** The terminal socket had no compression. With permessage-deflate (level 6, context kept), Ctrl+C during `seq` output on a 4 Mbps, 150 ms link brought the prompt back in 0.2 s instead of 7.6 s, and 0.87 MB crossed the link instead of 5.1 MB.
+- **Terminal flow control.** Output that does not compress (`head -c 200M /dev/urandom | base64`) still queued 44 MB at Cloudflare, and Ctrl+C had no visible effect within 120 s. The page now acknowledges drawn output and the bridge stops reading tmux beyond 128 K unacknowledged characters, so tmux skips output and redraws. Ctrl+C now takes 0.25 s on 4 Mbps and 150 ms, and 0.47 to 0.56 s over eight runs on 1 Mbps and 400 ms, with about 0.2 MB crossing the link. Keystroke echo is the round trip in every case (151 and 402 ms). A first suspicion that tmux sometimes failed to redraw came from the test proxy reordering data; with that fixed, eight of eight runs ended on a correct screen, rendered with headless xterm.
+- **Dead connections.** Phones drop sockets silently in the background, and the terminal had no check, so it could show Connected on a dead socket until TCP gave up. It now pings while visible and on becoming visible, and reconnects if nothing arrives within 5 s. Tested in headless Chromium by freezing the server: reconnected 5.0 s after the page woke; a healthy connection did not reconnect. The first reconnect is now immediate.
+- **Screen drops.** `Guacamole.Client` does not watch its tunnel, so a dead or closed screen socket left the last picture up, marked Connected. The page now watches the tunnel, retries lost connections (at once, then 1, 2, 4, 8 s), and lowers the receive timeout from 15 to 8 s. Tested by freezing the server: the drop was noticed 8 s later, the reconnect started at once, and the picture came back when the server resumed.
+- **Lossless WebP instead of PNG.** At high quality, guacd's PNGs made up most of the bytes of a recorded window redraw. Re-encoded as lossless WebP they came out at 76% of the size with the same pixels, with the slowest image at 26 ms (effort 1 up to 65,536 pixels, effort 0 above; a full 4K image takes about 180 ms at effort 0). On a fast LAN this roughly breaks even; on slow links it is a clear gain, so it is on by default and `DESKPORT_LOSSLESS_WEBP=0` turns it off. Lossy images from guacd are passed through untouched. An A/B run of the live redraw was not done.
+- **Screen compression unchanged.** On the recorded traffic, deflate already removes most of the base64 overhead (3651 to 2747 KB); keeping the context between messages saved 4% more, not worth the memory.
+- **Page loading.** Scripts and styles were 624 KB uncompressed, loaded in three rounds of imports, and the vendored libraries were revalidated daily. Everything is now served from memory under the content-hash path, immutable, brotli-compressed (147 KB), with every module preloaded from the page.
+- **Terminal drawing.** xterm now uses its WebGL renderer, which redraws a full screen far faster than the DOM renderer on phones. Checked in headless Chromium (SwiftShader); not yet seen on an iPhone.
+
 ## 2026-11-11 (late night)
 
 ### Apps that did not open on the separate desktop
