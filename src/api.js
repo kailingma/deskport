@@ -10,8 +10,9 @@ import { sameOrigin } from './auth.js';
  *   GET  /api/hosts          every host this server knows (multi-host groundwork)
  *   GET  /api/session        state of the separate desktop
  *   POST /api/session/stop   end the separate desktop (same-origin only)
+ *   GET  /api/monitors       the physical monitors My monitor can show
  */
-export function createApi({ hosts, session }) {
+export function createApi({ hosts, session, monitors }) {
   const api = express.Router();
   const noStore = (res) => res.set('Cache-Control', 'no-store');
 
@@ -38,6 +39,14 @@ export function createApi({ hosts, session }) {
       res.json(await session.state());
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  api.get('/api/monitors', async (req, res) => {
+    try {
+      noStore(res).json(await monitors.list());
+    } catch (err) {
+      res.status(500).json({ error: err.message.trim().split('\n').at(-1) });
     }
   });
 

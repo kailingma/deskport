@@ -30,6 +30,7 @@
     <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><path d="M6.5 9.5h.01M10 9.5h.01M13.5 9.5h.01M17 9.5h.01M6.5 13h.01M17 13h.01M10 13h4M7.5 15.5h9"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6M20.5 3.5v5h-5"/></symbol>
+    <symbol id="i-reload" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 0 1 14.5-6l2.5 2.5M20.5 3.5v5h-5M20.5 12A8.5 8.5 0 0 1 6 18l-2.5-2.5M3.5 20.5v-5h5"/></symbol>
     <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8M7 6.3a7.5 7.5 0 1 0 10 0"/></symbol>
     <symbol id="i-mark" viewBox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="12.5" width="14.5" height="12" rx="3"/><path d="M23 6.5v18"/></g><rect x="12" y="16" width="3.2" height="5" rx="0.8" fill="currentColor"/></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
@@ -47,6 +48,7 @@
       <span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#i-mark"/></svg></span>
       <span class="name">deskport</span>
       <span class="host" id="host"></span>
+      <span class="badge" id="status" data-state="idle" role="status"><span class="dot"></span><span class="badge-text">Idle</span></span>
     </div>
 
     <div class="segmented" role="tablist" aria-label="View">
@@ -59,7 +61,6 @@
     </div>
 
     <div class="bar-end">
-      <span class="badge" id="status" data-state="idle" role="status"><span class="dot"></span><span class="badge-text">Idle</span></span>
       <div class="tools screen-only">
         <select class="select select-bar" id="quick-source" aria-label="Show" title="What the Screen view shows">
           <option value="mirror">My monitor</option>
@@ -72,9 +73,11 @@
         <button class="btn-icon" data-action="super" title="Press Super (Activities)" aria-label="Press Super">
           <svg class="icon"><use href="#i-grid"/></svg>
         </button>
-        <button class="btn-text" data-action="cad" title="Send Ctrl+Alt+Delete">Ctrl+Alt+Del</button>
+        <button class="btn-icon" data-action="cad" title="Send Ctrl+Alt+Delete" aria-label="Send Ctrl+Alt+Delete">
+          <svg class="icon"><use href="#i-power"/></svg>
+        </button>
+        <span class="divider" aria-hidden="true"></span>
       </div>
-      <span class="divider" aria-hidden="true"></span>
       <button class="btn-icon" data-action="settings" title="Settings" aria-label="Settings">
         <svg class="icon"><use href="#i-sliders"/></svg>
       </button>
@@ -93,7 +96,9 @@
         <div class="dialog-card" role="alertdialog" aria-labelledby="screen-overlay-title" aria-describedby="screen-overlay-body">
           <h2 class="dialog-title" id="screen-overlay-title">Disconnected</h2>
           <p class="dialog-body" id="screen-overlay-body"></p>
-          <button class="btn-primary" data-action="reconnect">Reconnect</button>
+          <div class="dialog-actions">
+            <button class="btn-primary" data-action="reconnect">Reconnect</button>
+          </div>
         </div>
       </div>
       <textarea class="ime" id="screen-ime" aria-label="Type on the remote desktop" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
@@ -148,6 +153,7 @@
       <button class="sheet-item screen-only" data-action="super"><svg class="icon"><use href="#i-grid"/></svg>Press Super</button>
       <button class="sheet-item screen-only" data-action="cad"><svg class="icon"><use href="#i-power"/></svg>Send Ctrl+Alt+Delete</button>
       <button class="sheet-item" data-action="reconnect"><svg class="icon"><use href="#i-refresh"/></svg>Reconnect</button>
+      <button class="sheet-item" data-action="hard-reload"><svg class="icon"><use href="#i-reload"/></svg>Reload page</button>
       <button class="sheet-item" data-action="settings"><svg class="icon"><use href="#i-sliders"/></svg>Settings</button>
       <button class="sheet-item fs-only-supported" data-action="fullscreen"><svg class="icon"><use href="#i-maximize"/></svg>Full screen</button>
       <button class="sheet-item install-only" data-action="install"><svg class="icon"><use href="#i-maximize"/></svg>Full screen</button>
@@ -202,6 +208,18 @@
             <button type="button" class="btn-text btn-outline" data-action="end-session" id="end-session">End it</button>
           </div>
           <p class="field-help" id="session-state"></p>
+        </div>
+        <div id="monitor-rows">
+          <div class="field" id="monitor-pick-row" hidden>
+            <label class="field-label" for="set-monitor">Monitor</label>
+            <select class="select" id="set-monitor" data-setting="monitor" aria-describedby="monitor-help"></select>
+          </div>
+          <p class="field-help" id="monitor-help" hidden></p>
+          <div class="field">
+            <label class="field-label" for="set-match">Match this device</label>
+            <input type="checkbox" class="switch" id="set-match" role="switch" aria-describedby="match-help">
+          </div>
+          <p class="field-help" id="match-help"></p>
         </div>
         <div class="field">
           <label class="field-label" for="set-resolution">Resolution</label>
@@ -279,10 +297,29 @@
             <button type="button" role="radio" data-value="never">Never</button>
           </div>
         </div>
+        <div class="field">
+          <span class="field-label" id="lbl-kb">When the keyboard opens</span>
+          <div class="segmented segmented-sm" role="radiogroup" aria-labelledby="lbl-kb" aria-describedby="kb-help" data-setting="kbResize">
+            <button type="button" role="radio" data-value="resize">Fit above it</button>
+            <button type="button" role="radio" data-value="keep">Keep size</button>
+          </div>
+        </div>
+        <p class="field-help" id="kb-help"></p>
       </section>
 
       <p class="settings-foot" id="settings-who"></p>
     </div>
+  </dialog>
+
+  <dialog class="confirm" id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <form class="dialog-card" method="dialog">
+      <h2 class="dialog-title" id="confirm-title"></h2>
+      <p class="dialog-body" id="confirm-body"></p>
+      <div class="dialog-actions">
+        <button class="btn-secondary" value="cancel" id="confirm-cancel">Cancel</button>
+        <button class="btn-primary" value="ok" id="confirm-ok">OK</button>
+      </div>
+    </form>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

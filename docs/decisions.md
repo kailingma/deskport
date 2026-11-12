@@ -2,6 +2,30 @@
 
 Choices made while building deskport, newest first, with the reason for each. Entries marked *autonomous* were made while the owner was away and asked for choices to be made and logged.
 
+## 2026-11-11 (late night)
+
+### Apps that did not open on the separate desktop
+Firefox and every other snap failed with "cannot create transient scope: org.freedesktop.systemd1 was not provided": `snap run` puts each app in a systemd scope through the session bus, and the separate desktop's private bus has no systemd. A relay (`scripts/session-systemd-proxy.py`) now owns that name on the private bus and forwards to the real user manager. It refuses everything except starting scopes and reading state, because GNOME Shell calls SetEnvironment at startup and that would point the main desktop's apps at the separate one. Tested: a scope started through the relay, and SetEnvironment was refused.
+
+With the scope fixed, Firefox started but opened on the main desktop: snaps link `../wayland-0`, the main compositor, and their AppArmor profiles allow only `/run/user/<uid>/wayland-<n>` and `/run/user/<uid>/bus` or an abstract `@/tmp/dbus-*` socket. The separate desktop's compositor socket is now `/run/user/<uid>/wayland-90` (an absolute WAYLAND_DISPLAY, which snaps then use as is), and its bus also listens on an abstract socket. These two changes apply at the separate desktop's next start and are not yet tested. (A test Firefox window was open on the main desktop for about a minute while this was found.)
+
+Helium (and any Chromium browser) hands a new window to the copy already running on the main desktop, because one profile can only be open in one process. Only a separate profile for the separate desktop (Chromium honours `CHROME_CONFIG_HOME`) would change that; left to the owner.
+
+### Frame acknowledgements ahead of the browser (*autonomous*)
+The owner reported the picture freezing for over a second after `clear` in a terminal. On localhost the redraw arrived in about 25 ms, and the Terminal view had no main-thread stalls, so the delay is on the network path. guacd paces itself on the browser's frame acknowledgements and holds frames back when one comes back late, as a large frame over a slow link does. At Responsiveness the bridge now acknowledges frames itself as they leave, up to two ahead of the browser and only while under 256 KB waits in the socket (`src/pacing.js`). On a simulated 4 Mbps link, the median time for a keypress to show dropped from 380 to 485 ms to 309 to 355 ms over three runs each; the slowest tenth (about 1.3 s) is bandwidth and did not change. `DESKPORT_ACK_AHEAD=0` turns it off.
+
+### WebP instead of JPEG when re-encoding (*autonomous*)
+On captured desktop text, WebP was 15% smaller than JPEG at quality 60 and 39% smaller than 4:4:4 JPEG at quality 82, for about 20% more encoding time. The scaler now re-encodes lossy images as WebP.
+
+### Matching My monitor's resolution to the viewer
+The owner asked for it despite the earlier incident. It is off by default, asks before turning on (naming the incident), applies GNOME's temporary configuration only while someone is connected, and puts the previous one back four seconds after the last viewer leaves, also on the next server start if the server died. With several monitors, the chosen one is made primary for the session, since GNOME desktop sharing streams only the primary monitor; showing all monitors at once is not possible with it. Planning is unit-tested and applying and restoring was tested on the separate desktop's virtual monitor; it has never been run against the physical monitor.
+
+### Keyboard and the screen size
+New setting, Touch, When the keyboard opens: Fit above it (as before) or Keep size. Keep size leaves the picture and the remote desktop's size alone, and one finger moves the picture while it is taller than the space above the keyboard (*autonomous*: the alternative was no way to see what the keyboard covers).
+
+### One confirmation dialog, toolbar, reload
+Confirmations use the card of the screen's Disconnected message instead of the browser's `confirm()`. The desktop toolbar's sides now shrink instead of running into the view switch; the status sits next to the host name, Ctrl+Alt+Del is an icon, and narrow windows drop the labels. The More sheet has Reload page, which fetches every file the page loaded past the browser cache before reloading.
+
 ## 2026-11-11 (night)
 
 ### Multi-host groundwork, no visible change

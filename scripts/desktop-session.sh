@@ -45,6 +45,15 @@ for d in $(printf '%s\n' "$data_dirs" | tr ':' '\n' | tac); do
     ln -sf "$f" "$services/$name"
   done
 done
+# The systemd user manager is only on the real bus. Apps that start themselves
+# in a systemd scope through the session bus (every snap, and GNOME Shell for
+# the apps it launches) reach it through this relay.
+here=$(cd "$(dirname "$0")" && pwd)
+cat > "$services/org.freedesktop.systemd1.service" <<EOF
+[D-BUS Service]
+Name=org.freedesktop.systemd1
+Exec=/usr/bin/python3 $here/session-systemd-proxy.py unix:path=$uid_dir/bus
+EOF
 
 cat > "$dir/bus.conf" <<EOF
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
@@ -53,6 +62,7 @@ cat > "$dir/bus.conf" <<EOF
   <type>session</type>
   <keep_umask/>
   <listen>unix:path=$dir/bus</listen>
+  <listen>unix:abstract=/tmp/dbus-deskport-session-$(id -u)</listen>
   <auth>EXTERNAL</auth>
   <servicedir>$services</servicedir>
   <policy context="default">
@@ -71,8 +81,17 @@ export GNOME_KEYRING_CONTROL="$uid_dir/keyring"
 export SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-$uid_dir/keyring/ssh}"
 export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME XDG_SESSION_DESKTOP=gnome
 
+# Snaps' AppArmor profiles allow only /run/user/<uid>/bus or an abstract
+# "@/tmp/dbus-*" socket for the session bus, and /run/user/<uid>/wayland-<n> for
+# Wayland. The bus also listens on an abstract socket (clients fall back to it),
+# and the compositor's socket sits in the real runtime directory under a name
+# the main desktop does not use. Snaps given a relative WAYLAND_DISPLAY link
+# "../wayland-0", which is the main desktop's compositor.
+export DESKPORT_WAYLAND="$uid_dir/wayland-90"
+rm -f "$DESKPORT_WAYLAND" "$DESKPORT_WAYLAND.lock"
+
 exec dbus-run-session --config-file="$dir/bus.conf" -- sh -c '
-  gnome-shell --headless &
+  gnome-shell --headless --wayland-display="$DESKPORT_WAYLAND" &
   shell=$!
   i=0
   until gdbus introspect --session --dest org.gnome.Mutter.ScreenCast \

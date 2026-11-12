@@ -142,7 +142,8 @@ button { font: inherit; color: inherit; }
 .bar {
   flex: none;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* The sides shrink (and truncate the host name) before they reach the centre. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
   height: calc(var(--bar-h) + var(--safe-t));
@@ -199,15 +200,15 @@ button { font: inherit; color: inherit; }
   box-shadow: 0 0 0 1px var(--border), 0 1px 2px oklch(0 0 0 / 0.06);
 }
 
-.bar-end { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
-.tools { display: flex; align-items: center; gap: 4px; }
+.bar-end { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
+.tools { display: flex; align-items: center; gap: 2px; min-width: 0; }
 body[data-view="term"] .screen-only { display: none; }
 .divider { width: 1px; height: 20px; margin: 0 4px; background: var(--border); }
 
 .badge {
   display: inline-flex; align-items: center; gap: 6px;
   height: 24px;
-  margin-right: 8px;
+  flex: none;
   padding: 0 9px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -251,10 +252,33 @@ body[data-view="term"] .screen-only { display: none; }
   cursor: pointer;
 }
 .btn-primary:hover { filter: brightness(1.06); }
+.btn-secondary {
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 500;
+  cursor: pointer;
+}
+.btn-secondary:hover { background: var(--surface-3); }
+@media (pointer: coarse) { .btn-primary, .btn-secondary { height: 44px; } }
 .btn-outline { border-color: var(--border); color: var(--text); }
 
-.select-bar { min-width: 0; height: 32px; margin-right: 4px; font-size: 13px; font-weight: 500; }
-@media (pointer: coarse) { .select-bar { height: 40px; } }
+.bar .select-bar { min-width: 0; width: auto; height: 32px; margin-right: 2px; padding-left: 10px; font-size: 13px; font-weight: 500; }
+
+/* Narrow desktop windows: icons only in the view switch, no wordmark. */
+@media (max-width: 1000px) {
+  .bar .name { display: none; }
+  .bar .host { padding-left: 0; border-left: 0; }
+  .seg span { display: none; }
+  .seg { padding: 0 10px; }
+}
+@media (max-width: 800px) {
+  .bar .host { display: none; }
+}
+@media (pointer: coarse) { .bar .select-bar { height: 40px; } }
 
 /* ---------- Full screen: the bar becomes a floating toolbar ---------- */
 
@@ -274,7 +298,6 @@ body.is-fullscreen .bar {
 }
 body.is-fullscreen .name { display: none; }
 body.is-fullscreen .host { padding-left: 0; border-left: 0; }
-body.is-fullscreen .badge { margin-right: 4px; }
 body.is-fullscreen .bar.is-idle {
   transform: translate(-50%, calc(-100% - 12px - var(--safe-t)));
   opacity: 0;
@@ -354,8 +377,23 @@ body.is-fullscreen .term-wrap { padding-top: 16px; }
   box-shadow: var(--shadow-float);
 }
 .dialog-title { margin: 0 0 4px; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
-.dialog-body { margin: 0 0 16px; color: var(--text-2); }
+.dialog-body { margin: 0; color: var(--text-2); }
 .dialog-body:empty { display: none; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+/* Confirmation questions: the overlay's card, shown as a modal dialog. */
+.confirm {
+  width: min(360px, calc(100% - 32px));
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  overflow: visible;
+}
+.confirm .dialog-card { width: 100%; }
+.confirm::backdrop { background: oklch(0 0 0 / 0.55); }
+.confirm[open] { animation: settings-in 0.22s var(--ease); }
 
 .toast {
   position: fixed;

@@ -4,8 +4,20 @@
     {
       "name": "deskport-dev",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "export PATH=\"$HOME/.local/share/fnm/aliases/default/bin:$PATH\" && DESKPORT_PORT=7901 exec npm run dev"],
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/.local/share/fnm/aliases/default/bin:$PATH\" && DESKPORT_PORT=7901 exec npm run dev"
+      ],
       "port": 7901
+    },
+    {
+      "name": "deskport-test",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/.local/share/fnm/aliases/default/bin:$PATH\" && DESKPORT_PORT=7902 DESKPORT_TMUX_SESSION=deskport-test exec npm run dev"
+      ],
+      "port": 7902
     }
   ]
 }

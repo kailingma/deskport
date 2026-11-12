@@ -208,7 +208,7 @@ Six schemes in `public/js/themes.js`, chosen in Settings: deskport dark (default
 
 ## Layout
 
-A single full-viewport column: top bar, then the view fills the rest. The bar is a three-column grid (host and mark left, Screen/Terminal segmented control centred, status and tools right) at 52px high with 16px side padding. The remote screen is centred on the stage and scaled into the space; the terminal has 12px top and 14px left padding on its ground. Spacing is a loose 4, 8, 12, 16, 20 rhythm with no formal scale in code. Safe-area insets are respected on every edge.
+A single full-viewport column: top bar, then the view fills the rest. The bar is a three-column grid (mark, wordmark, host and status left; Screen/Terminal segmented control centred; tools right) at 52px high with 16px side padding. The side columns shrink before they reach the centre; under 1000px the wordmark and the segment labels go, under 800px the host name. Confirmations use the dialog card (title, body, Cancel and the primary action, right-aligned) over a 55% black backdrop, the same card as the screen's Disconnected message. The remote screen is centred on the stage and scaled into the space; the terminal has 12px top and 14px left padding on its ground. Spacing is a loose 4, 8, 12, 16, 20 rhythm with no formal scale in code. Safe-area insets are respected on every edge.
 
 Full screen replaces the bar with a floating toolbar (48px, 12px radius, centred 10px from the top) and hides the wordmark. When idle it slides up out of view and a 64 by 18px handle remains at the top edge.
 

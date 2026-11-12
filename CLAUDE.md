@@ -6,7 +6,7 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 
 - Node comes from fnm, and new shells may not have it on `PATH`. Prefix commands with `export PATH="$HOME/.local/share/fnm/aliases/default/bin:$PATH"`.
 - `npm test` runs the `node --test` suite. `npm run check` syntax-checks every file it lists; add new `src/` files to that script.
-- Dev server: `.claude/launch.json` entry `deskport-dev` (port 7901, `--watch`, Access checks off). The production server is `deskport.service` on 7900.
+- Dev server: `.claude/launch.json` entry `deskport-dev` (port 7901, `--watch`, Access checks off), or `deskport-test` (port 7902, tmux session `deskport-test`, safe for terminal tests). The production server is `deskport.service` on 7900.
 - Deploy: `systemctl --user restart deskport`. After changing a unit or `scripts/install-services.sh`, run that script instead; it also restarts the tunnel.
 - Do not restart or stop `deskport-session.service` (the separate desktop) without asking: apps the owner has open in it close. Changes to `scripts/desktop-session.sh` apply on its next start.
 - Commit and push to `main` when work is done (the owner has asked for that). Keep the repo machine-neutral: no hostnames, domains, emails or account IDs. Scan the staged diff for them before each commit.
@@ -14,7 +14,7 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 ## Testing without disturbing the owner
 
 - **Never send input to My monitor** (`source=mirror`): it is the owner's live desktop. Read-only connections are fine. For anything that types or clicks, use the separate desktop (`source=session`); `scripts/measure-typing.mjs` does this.
-- **Never change the main desktop's monitor configuration** (Mutter `DisplayConfig`, `monitors.xml`, display scale). It once left the display unable to draw until a re-login. Changing it on the separate desktop's private bus (`scripts/session-scale.py`) is safe.
+- **Never change the main desktop's monitor configuration** (Mutter `DisplayConfig`, `monitors.xml`, display scale). It once left the display unable to draw until a re-login. Changing it on the separate desktop's private bus (`scripts/session-scale.py`, `scripts/monitor-config.py`) is safe. The Match this device setting changes it on purpose; do not turn it on in tests.
 - **Terminal tests** resize the owner's tmux session `web`. Run a second server on another port with `DESKPORT_TMUX_SESSION=<throwaway>` and kill that tmux session afterwards.
 - **Browser pane**: the page reconnects the last view on load, including the screen. On a fresh origin, first open `/api/host`, set `localStorage['deskport.view'] = 'term'`, then load `/`.
 - **Stopping test servers**: kill the PID from `ss -ltnp`. `pkill -f <pattern>` matches your own shell's command line and kills it.
@@ -39,3 +39,6 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 
 - Not yet confirmed on an iPhone: menus scrolling over the Screen view, the separate desktop at scale 2, the phone layout without a top bar, and the Add to Home Screen path.
 - Multi-host: the steps under "What is left" in docs/multi-host.md.
+- Separate desktop: snaps opening there (the `wayland-90` socket and abstract bus address in `desktop-session.sh`) need a restart of it to test. Chromium browsers open on the main desktop while open there.
+- Match this device (My monitor) has never been run against the physical monitor. Never turn it on in a test; only the owner does.
+- Windows XP clients: research only, docs/legacy-clients.md.

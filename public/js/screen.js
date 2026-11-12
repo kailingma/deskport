@@ -190,8 +190,9 @@ export function createScreen({ host, setStatus, toast }) {
       g.y = p.clientY;
       if (!g.mode && Math.hypot(g.x - g.x0, g.y - g.y0) > MOVE_SLOP) {
         clearTimeout(g.timer);
-        // Zoomed in, one finger moves around the picture; otherwise it scrolls the desktop.
-        g.mode = zoom > 1 ? 'pan' : 'scroll';
+        // When the picture is bigger than the view (zoomed in, or kept at its size
+        // under the keyboard), one finger moves around it; otherwise it scrolls the desktop.
+        g.mode = zoom > 1 || overflows() ? 'pan' : 'scroll';
         scrollAt = { x: g.x0, y: g.y0 };
         scroller.start(e.timeStamp);
       }
@@ -346,17 +347,23 @@ export function createScreen({ host, setStatus, toast }) {
     // sharp, except for an extra monitor or separate desktop, which GNOME makes
     // at exactly this size.
     const ratio = window.devicePixelRatio || 1;
-    const sized = settings.get('source') !== 'mirror';
+    const matched = settings.get('source') === 'mirror' && settings.get('matchMonitor');
+    const sized = settings.get('source') !== 'mirror' || matched;
     const headroom = !sized && matchMedia('(pointer: coarse)').matches ? 2 : 1;
+    const width = Math.round(wrap.clientWidth * ratio * headroom);
+    const height = Math.round(wrap.clientHeight * ratio * headroom);
+    sentSize = `${width}x${height}`;
     const params = new URLSearchParams({
-      width: String(Math.round(wrap.clientWidth * ratio * headroom)),
-      height: String(Math.round(wrap.clientHeight * ratio * headroom)),
+      width: String(width),
+      height: String(height),
       dpi: String(Math.round(96 * ratio)),
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
       quality: settings.get('quality'),
       priority: settings.get('priority'),
       res: settings.get('resolution'),
       source: settings.get('source'),
+      ...(matched ? { match: '1' } : {}),
+      ...(settings.get('monitor') !== 'primary' ? { monitor: settings.get('monitor') } : {}),
     });
     c.connect(params.toString());
   }
@@ -418,16 +425,28 @@ export function createScreen({ host, setStatus, toast }) {
     toast(`Sent ${text.length} characters. Paste with Ctrl+V on the remote desktop`);
   }
 
+  const overflows = () => wrap.scrollHeight > wrap.clientHeight + 1 || wrap.scrollWidth > wrap.clientWidth + 1;
+
   // For an extra monitor or separate desktop, ask GNOME to resize it when this
-  // window changes size or the device rotates.
+  // window changes size or the device rotates. With "Keep size", the on-screen
+  // keyboard opening or closing changes neither the picture nor the desktop.
   let resizeTimer;
+  let sentSize = '';
+  let kbWasOpen = false;
   new ResizeObserver(() => {
+    const kbOpen = document.body.classList.contains('kb-open');
+    const kbChanged = kbOpen !== kbWasOpen;
+    kbWasOpen = kbOpen;
+    if (settings.get('kbResize') === 'keep' && (kbOpen || kbChanged)) return;
     rescale();
     if (!client || settings.get('source') === 'mirror') return;
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const ratio = window.devicePixelRatio || 1;
-      client?.sendSize(Math.round(wrap.clientWidth * ratio), Math.round(wrap.clientHeight * ratio));
+      const size = [Math.round(wrap.clientWidth * ratio), Math.round(wrap.clientHeight * ratio)];
+      if (!client || size.join('x') === sentSize) return;
+      sentSize = size.join('x');
+      client.sendSize(...size);
     }, 600);
   }).observe(wrap);
   window.addEventListener('blur', () => keyboard?.reset());

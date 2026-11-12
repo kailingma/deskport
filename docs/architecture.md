@@ -21,14 +21,17 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | `src/guac.js` | Guacamole protocol encoder and parser, and the bridge between a browser WebSocket and a guacd TCP connection. |
 | `src/scaler.js` | Shrinks and re-encodes the screen stream for the Resolution and Quality settings. |
 | `src/session.js` | Starts, checks and stops the separate desktop's systemd unit, and sets its monitor scale. |
+| `src/monitors.js` | Lists the physical monitors, and for My monitor changes the monitor's mode to fit the viewer and the primary monitor while connected, then puts the configuration back. |
+| `src/pacing.js` | Acknowledges frames to guacd ahead of the browser at Responsiveness. |
 | `src/terminal.js` | Attaches a WebSocket to tmux through a pseudo-terminal. |
 | `public/app.js` | Entry point: views, full screen and the floating toolbar, settings dialog, key row, viewport handling. |
 | `public/js/screen.js` | Screen view: Guacamole client, scaling and zoom, touch gestures, soft keyboard. |
 | `public/js/terminal.js` | Terminal view: xterm.js, reconnects, touch scrolling and selection, appearance settings. |
 | `public/js/host.js` | The host a view talks to: builds every API and WebSocket URL, with an `/h/<id>` prefix for other hosts later. |
+| `public/js/dialog.js` | The confirmation dialog. |
 | `public/js/settings.js`, `themes.js`, `keys.js`, `gestures.js` | Per-device settings store, terminal colour schemes and fonts, key codes and sticky modifiers, scroll momentum. |
 | `public/` (rest) | `index.html`, `style.css`, `theme-init.js` (applies a saved light/dark choice before first paint), icons, manifest. No build step. |
-| `scripts/` | `setup-rdp.sh`, `install-services.sh`, `desktop-session.sh` (the separate desktop), `session-scale.py` (sets its monitor scale), `make-icons.mjs`, `measure-screen.mjs`, `measure-typing.mjs`. |
+| `scripts/` | `setup-rdp.sh`, `install-services.sh`, `desktop-session.sh` (the separate desktop), `session-scale.py` (sets its monitor scale), `session-systemd-proxy.py` (systemd on its private bus), `monitor-config.py` (reads and applies Mutter's monitor configuration), `make-icons.mjs`, `measure-screen.mjs`, `measure-typing.mjs` (`LINK_KBPS` simulates a slow link), `measure-clear.mjs`. |
 | `deploy/` | guacd compose file and the cloudflared config example. |
 | `test/` | `node --test` tests for the protocol parser, the scaler, the separate desktop's size and scale, and the host registry. |
 
@@ -68,10 +71,11 @@ From then on it forwards complete instructions both ways. Guacamole element leng
 The browser passes three picture settings in the query string: `res` (`auto`, `1`, `0.75`, `0.5`, `0.33`), `quality` (`low`, `medium`, `high`, `lossless`) and `priority` (`speed`, `data`).
 
 - `quality=lossless` sets guacd's `force-lossless`.
+- `priority=speed` acknowledges each frame to guacd as soon as it is handed to the browser's socket, up to two frames ahead of the browser and while under 256 KB is waiting there (`src/pacing.js`). guacd holds frames back when an acknowledgement comes back later than usual, which a large frame on a slow link causes. The browser's own acknowledgements for frames already acknowledged are dropped.
 - `priority=data` caps the frame rate at 10 fps. guacd sends the next frame only after the browser acknowledges the previous one with a `sync` instruction, so the bridge holds acknowledgements back until 100 ms have passed since the last one it forwarded. While one is held, newer ones replace it, and only the newest is sent: it covers every earlier frame. (Queueing each held acknowledgement 100 ms behind the previous one built up seconds of delay during bursts such as typing.)
 - When `res` is below 1, or quality is `low` or `medium`, the bridge passes guacd's output through `src/scaler.js`:
   - Every coordinate in drawing instructions (`size`, `rect`, `copy`, `transfer`, `cursor`, `mouse`, `move`, path instructions) is multiplied by the scale. Spans are mapped edge by edge, so adjacent rectangles stay adjacent after rounding.
-  - Each image stream (`img`, `blob`, `end`) is collected, resized with sharp (libvips), re-encoded (JPEG; WebP when the image has alpha; PNG for lossless), and emitted where the original `end` was. Output stays in order because a queue waits on each image before sending what follows it.
+  - Each image stream (`img`, `blob`, `end`) is collected, resized with sharp (libvips), re-encoded (WebP at quality 35, 60 or 82; PNG for lossless), and emitted where the original `end` was. Output stays in order because a queue waits on each image before sending what follows it.
   - Mouse instructions from the browser are divided by the scale on the way back.
   - For `auto`, the scale is chosen when guacd reports the desktop size: the largest picture that fits the browser's device pixels (twice that on touch screens, for pinch-zoom headroom). Output is held until then.
   - Moved regions (`copy`) are rounded to whole pixels at the smaller size, so a scrolled area can sit up to half a pixel off until it is redrawn.
@@ -84,6 +88,8 @@ The browser passes three picture settings in the query string: `res` (`auto`, `1
 
 The scaler never shrinks `virtual` or `session` pictures; they are already the browser's size.
 
+With `source=mirror`, `match=1` makes `src/monitors.js` switch the monitor to the mode that best fits the browser (the largest that fits inside it, else the smallest; for outputs mirrored in one logical monitor, a size all of them offer), and `monitor=<connector>` makes that monitor primary, since desktop sharing streams the primary one. Both use Mutter's DisplayConfig with temporary configurations through `scripts/monitor-config.py`. The configuration before the change is kept in memory and in `$XDG_RUNTIME_DIR/deskport-monitors-<port>.json`, and put back 4 s after the last such viewer disconnects, or at the next server start. `GET /api/monitors` lists the monitors.
+
 ### The separate desktop
 
 `scripts/desktop-session.sh` runs a second GNOME Shell for the same user with `gnome-shell --headless` (no physical outputs, so it cannot touch the monitors) and `gnome-remote-desktop-daemon --headless` on port 3391. Each RDP client gets its own virtual monitor, sized to the client and resized with it.
@@ -94,6 +100,8 @@ Two GNOME Shells for one user would collide on the session bus and in the runtim
 - a private runtime directory, `$XDG_RUNTIME_DIR/deskport-session`, for its Wayland socket, accessibility bus, portals, dconf notifications and gvfs mounts. (Without it, the second session's accessibility bus replaced the main one's socket.) PipeWire, PulseAudio and the keyring point back at the main session's sockets.
 
 Files, settings (dconf) and the keyring are shared with the main desktop.
+
+Snaps need three more things there. `snap run` starts each app in a systemd scope through the session bus, so `scripts/session-systemd-proxy.py` owns `org.freedesktop.systemd1` on the private bus (started on demand) and relays to the real user manager, refusing anything but starting scopes and reading state. Snap AppArmor profiles allow only `/run/user/<uid>/wayland-<n>` for Wayland and `/run/user/<uid>/bus` or an abstract `@/tmp/dbus-*` socket for the session bus, so the compositor's socket is `/run/user/<uid>/wayland-90` (an absolute WAYLAND_DISPLAY) and the private bus also listens on an abstract socket. A Chromium browser already open on the main desktop still takes new windows there: one profile can be open in only one process.
 
 GNOME creates each client's monitor at scale 1, which is tiny on a phone. `sessionLayout()` in `src/guac.js` picks the largest whole scale up to the device's pixel ratio that GNOME allows (it needs at least 800 × 480 logical pixels) and rounds the size so the logical size is whole. With a scale of 2 or more, guacd gets the browser's real DPI (full device pixels), and once guacd reports the new desktop size, `scripts/session-scale.py` sets that monitor's scale through `org.gnome.Mutter.DisplayConfig.ApplyMonitorsConfig` on the private bus (temporary method, nothing written to `monitors.xml`). Resizes from the browser are rounded the same way. Otherwise guacd gets `dpi=96` and makes the desktop at CSS-pixel size.
 

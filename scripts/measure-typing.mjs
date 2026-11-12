@@ -3,11 +3,13 @@
 // reaches the desktop on the monitor. Opens the Activities search, types
 // letters and backspaces, and times each key press until guacd's next drawing
 // instruction reaches this client.
-// Usage: node scripts/measure-typing.mjs [ws://host:port] [query ...]
+// Usage: [ACK_DELAY=ms] [LINK_KBPS=n] node scripts/measure-typing.mjs [ws://host:port] [query ...]
 import WebSocket from 'ws';
 
 const [base = 'ws://127.0.0.1:7900', ...queries] = process.argv.slice(2);
 const cases = queries.length ? queries : ['quality=high&res=1', 'quality=low&res=1', 'quality=high&res=1&priority=data'];
+const ackDelay = Number(process.env.ACK_DELAY || 0);
+const linkKbps = Number(process.env.LINK_KBPS || 0);
 const KEYS = { superL: 0xffeb, esc: 0xff1b, backspace: 0xff08 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const enc = (...el) => el.map((e) => `${[...String(e)].length}.${e}`).join(',') + ';';
@@ -17,13 +19,25 @@ function measure(query) {
     const url = `${base}/ws/screen?width=1280&height=720&dpi=96&source=session&${query}`;
     const ws = new WebSocket(url, 'guacamole', { origin: base.replace(/^ws/, 'http'), perMessageDeflate: true });
     let waiting = null; // { t0, resolve }
+    // LINK_KBPS simulates a slow link: each message arrives after the ones
+    // before it at that rate (plus ACK_DELAY), and frames are acknowledged and
+    // timed on arrival. ACK_DELAY alone delays acknowledgements by a fixed time.
+    let busyUntil = 0;
     ws.on('message', (data) => {
       const s = data.toString();
-      for (const f of s.matchAll(/4\.sync,(\d+)\.(\d+)[,;]/g)) ws.send(`4.sync,${f[1]}.${f[2]};`);
+      let arrive = Date.now();
+      if (linkKbps) {
+        arrive = Math.max(arrive, busyUntil) + (s.length * 8) / linkKbps;
+        busyUntil = arrive;
+      }
+      const at = (fn) => setTimeout(fn, Math.max(0, arrive + ackDelay - Date.now()));
+      for (const f of s.matchAll(/4\.sync,(\d+)\.(\d+)[,;]/g)) {
+        at(() => ws.readyState === ws.OPEN && ws.send(`4.sync,${f[1]}.${f[2]};`));
+      }
       if (waiting && /(^|;)\d+\.(img|png|rect|copy|cfill|transfer|blob),/.test(s)) {
         const w = waiting;
         waiting = null;
-        w.resolve(Date.now() - w.t0);
+        w.resolve(Math.round(arrive - w.t0));
       }
     });
     const key = (keysym) => { ws.send(enc('key', keysym, 1)); ws.send(enc('key', keysym, 0)); };

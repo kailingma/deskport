@@ -6,6 +6,8 @@ const phone = matchMedia('(max-width: 640px)').matches;
 export const DEFAULTS = {
   theme: 'system', // system | light | dark
   source: 'mirror', // mirror: the physical monitor | virtual: an extra GNOME monitor sized to this device | session: a separate headless desktop
+  matchMonitor: false, // mirror only: change the monitor's mode to fit this device while connected
+  monitor: 'primary', // mirror only: 'primary' or a connector name such as DP-1
   resolution: 'auto', // auto | 1 | 0.75 | 0.5 | 0.33 (scale of the desktop's native size)
   quality: 'high', // low | medium | high | lossless
   priority: 'speed', // speed: every frame | data: about 10 frames per second
@@ -16,6 +18,7 @@ export const DEFAULTS = {
   cursorStyle: 'block', // block | bar | underline
   cursorBlink: true,
   keyRow: 'auto', // auto | always | never
+  kbResize: 'resize', // resize: the screen fits above the on-screen keyboard | keep: the keyboard covers the screen, which keeps its size
 };
 
 function load() {

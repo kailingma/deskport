@@ -36,7 +36,7 @@ test('re-encodes and resizes images, in stream order', async () => {
     encode(['size', '0', '100', '100']) + encode(['img', '3', '14', '0', 'image/png', '10', '10'])
     + encode(['blob', '3', b64]) + encode(['end', '3']) + encode(['sync', '1']));
   const img = out.find((e) => e[0] === 'img');
-  assert.deepEqual(img, ['img', '3', '14', '0', 'image/jpeg', '5', '5']);
+  assert.deepEqual(img, ['img', '3', '14', '0', 'image/webp', '5', '5']);
   const blob = out.find((e) => e[0] === 'blob');
   const meta = await sharp(Buffer.from(blob[2], 'base64')).metadata();
   assert.equal(meta.width, 20);

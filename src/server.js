@@ -11,6 +11,7 @@ import { handleTerminal } from './terminal.js';
 import { createSessionControl } from './session.js';
 import { createHostRegistry, routeFor } from './hosts.js';
 import { createApi } from './api.js';
+import { createMonitors } from './monitors.js';
 import { createUi } from './ui.js';
 
 // Starts one deskport host: authentication and security headers, the API, the
@@ -38,6 +39,13 @@ const session = createSessionControl({
   port: config.rdp.sessionPort,
   log,
 });
+// The desktop on the monitor is this user's main session bus.
+const monitors = createMonitors({
+  bus: process.env.DBUS_SESSION_BUS_ADDRESS || `unix:path=/run/user/${process.getuid()}/bus`,
+  id: String(config.port),
+  log,
+});
+monitors.restoreLeftover();
 
 // ---------- HTTP ----------
 
@@ -66,7 +74,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const api = createApi({ hosts, session });
+const api = createApi({ hosts, session, monitors });
 app.use(api);
 app.use('/h/:hostId', (req, res, next) => {
   const host = hosts.get(req.params.hostId);
@@ -93,7 +101,7 @@ const screenWss = new WebSocketServer({
 });
 const termWss = new WebSocketServer({ noServer: true });
 const endpoints = {
-  '/ws/screen': { wss: screenWss, open: (ws, req) => handleScreen(ws, req, { ...config, session }, log) },
+  '/ws/screen': { wss: screenWss, open: (ws, req) => handleScreen(ws, req, { ...config, session, monitors }, log) },
   '/ws/term': { wss: termWss, open: (ws) => handleTerminal(ws, config.terminal, log) },
 };
 

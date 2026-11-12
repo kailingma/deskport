@@ -4,6 +4,7 @@ import { toggleMod } from './js/keys.js';
 import { createScreen } from './js/screen.js';
 import { createTerminal } from './js/terminal.js';
 import { localHost } from './js/host.js';
+import { ask } from './js/dialog.js';
 
 const $ = (id) => document.getElementById(id);
 // One host for now: the server that served this page (docs/multi-host.md).
@@ -142,8 +143,8 @@ handle.addEventListener('click', wakeBar);
 const settingsDialog = $('settings');
 const QUALITY = ['low', 'medium', 'high', 'lossless'];
 const QUALITY_HELP = {
-  low: 'JPEG at 35% quality. Small text is hard to read. Uses the least data.',
-  medium: 'JPEG at 60% quality. Text is readable.',
+  low: 'Compressed at 35% quality. Small text is hard to read. Uses the least data.',
+  medium: 'Compressed at 60% quality. Text is readable.',
   high: 'Sharp. Areas that are changing look soft for a moment.',
   lossless: 'Exact pixels. Uses about a third more data than High.',
 };
@@ -151,7 +152,11 @@ const PRIORITY_HELP = {
   speed: 'Sends every frame as soon as it is ready.',
   data: 'Sends at most 10 frames a second.',
 };
-const SCREEN_SETTINGS = ['source', 'resolution', 'quality', 'priority'];
+const SCREEN_SETTINGS = ['source', 'resolution', 'quality', 'priority', 'matchMonitor', 'monitor'];
+const KB_HELP = {
+  resize: 'The screen shrinks to fit above the keyboard. A separate desktop or extra monitor is resized to match.',
+  keep: 'The keyboard covers the bottom of the screen and nothing is resized. Drag with one finger to see what is under it.',
+};
 const SOURCE_HELP = {
   mirror: 'What is on your monitor, at its resolution.',
   virtual: 'A second monitor next to yours, sized to this device. It has no top bar or dock, so drag windows onto it.',
@@ -177,10 +182,17 @@ function syncSettingsForm() {
   const source = settings.get('source');
   $('set-source').value = source;
   $('source-help').textContent = SOURCE_HELP[source];
+  const matched = source === 'mirror' && settings.get('matchMonitor');
+  $('monitor-rows').hidden = source !== 'mirror';
+  $('set-match').checked = settings.get('matchMonitor');
+  $('match-help').textContent = settings.get('matchMonitor')
+    ? 'While you are connected, the monitor switches to the resolution closest to this device. It switches back a few seconds after you disconnect.'
+    : 'Off: the monitor keeps its resolution and the picture is scaled to fit.';
+  syncMonitorPick();
   $('set-resolution').value = settings.get('resolution');
-  $('set-resolution').disabled = source !== 'mirror';
+  $('set-resolution').disabled = source !== 'mirror' || matched;
   const size = screen.pictureSize();
-  $('resolution-help').textContent = source !== 'mirror'
+  $('resolution-help').textContent = source !== 'mirror' || matched
     ? 'Always matches this window.'
     : size ? `Receiving ${size[0]} × ${size[1]} pixels.` : '';
   $('set-quality').value = String(QUALITY.indexOf(settings.get('quality')));
@@ -191,6 +203,7 @@ function syncSettingsForm() {
   $('set-term-size').value = String(settings.get('termFontSize'));
   $('term-size-value').textContent = `${settings.get('termFontSize')}px`;
   $('set-blink').checked = settings.get('cursorBlink');
+  $('kb-help').textContent = KB_HELP[settings.get('kbResize')];
   $('settings-who').textContent = me ? `Signed in as ${me.email} on ${me.host}` : '';
 }
 
@@ -212,8 +225,23 @@ settingsDialog.addEventListener('keydown', (e) => {
   next.click();
   next.focus();
 });
-settingsDialog.addEventListener('input', (e) => {
+settingsDialog.addEventListener('input', async (e) => {
   const t = e.target;
+  if (t.id === 'set-match') {
+    if (!t.checked) settings.set('matchMonitor', false);
+    else {
+      t.checked = false;
+      const ok = await ask({
+        title: 'Change your monitor\'s resolution?',
+        body: 'While you are connected, the physical monitor switches to the resolution closest to this device, and windows on it rearrange. '
+          + 'On this computer a resolution change once left the monitor blank until the next login.',
+        confirm: 'Turn on',
+      });
+      if (ok) settings.set('matchMonitor', true);
+    }
+    syncSettingsForm();
+    return;
+  }
   if (t.id === 'set-quality') settings.set('quality', QUALITY[Number(t.value)]);
   else if (t.id === 'set-term-size') settings.set('termFontSize', Number(t.value));
   else if (t.id === 'set-blink') settings.set('cursorBlink', t.checked);
@@ -233,11 +261,35 @@ settingsDialog.addEventListener('close', () => {
   }
 });
 
+// ---------- physical monitors (My monitor) ----------
+
+let monitorList = [];
+function syncMonitorPick() {
+  const pick = $('set-monitor');
+  const several = monitorList.length > 1;
+  $('monitor-pick-row').hidden = !several;
+  $('monitor-help').hidden = !several;
+  if (!several) return;
+  pick.replaceChildren(new Option('Primary monitor', 'primary'),
+    ...monitorList.map((m) => new Option(`${m.name} (${m.connector})${m.primary ? ', primary' : ''}`, m.connector)));
+  pick.value = monitorList.some((m) => m.connector === settings.get('monitor')) ? settings.get('monitor') : 'primary';
+  $('monitor-help').textContent = 'GNOME desktop sharing shows one monitor at a time. The one chosen is made the primary monitor while you are connected.';
+}
+async function refreshMonitors() {
+  try {
+    monitorList = await host.json('/api/monitors');
+  } catch {
+    monitorList = [];
+  }
+  syncMonitorPick();
+}
+
 function openSettings() {
   screen.cancelGesture();
   screenAtOpen = screenSettings();
   syncSettingsForm();
   refreshSession();
+  refreshMonitors();
   settingsDialog.showModal();
 }
 
@@ -261,7 +313,12 @@ async function refreshSession() {
 }
 
 async function endSession() {
-  if (!confirm('End the separate desktop? Apps open in it will close.')) return;
+  const ok = await ask({
+    title: 'End the separate desktop?',
+    body: 'Apps open in it will close. It starts again the next time you show it.',
+    confirm: 'End it',
+  });
+  if (!ok) return;
   $('end-session').disabled = true;
   try {
     await host.json('/api/session/stop', { method: 'POST' });
@@ -322,6 +379,24 @@ settings.onChange((key) => {
   if (key === 'source') syncSource();
 });
 
+// ---------- reload without the browser cache ----------
+
+// Browsers have no forced reload a page can trigger, so every file this page
+// loaded is fetched again past the cache first, then the page reloads.
+async function hardReload() {
+  toast('Reloading');
+  try {
+    const urls = new Set([location.href, ...performance.getEntriesByType('resource').map((e) => e.name)]);
+    const own = [...urls].filter((u) => {
+      const url = new URL(u);
+      return url.origin === location.origin && !/^\/(h\/[^/]+\/)?(api|ws)\//.test(url.pathname);
+    });
+    await Promise.all(own.map((u) => fetch(u, { cache: 'reload', credentials: 'same-origin' }).catch(() => {})));
+    if (window.caches) for (const key of await caches.keys()) await caches.delete(key);
+  } catch {}
+  location.reload();
+}
+
 // ---------- actions (top bar, toolbar, sheet) ----------
 
 const sheet = $('sheet');
@@ -338,6 +413,7 @@ const actions = {
   settings: openSettings,
   'close-settings': () => settingsDialog.close(),
   'end-session': endSession,
+  'hard-reload': hardReload,
   install: () => $('install').showModal(),
   'close-install': () => $('install').close(),
 };

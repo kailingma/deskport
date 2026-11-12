@@ -4,6 +4,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createScaler } from './scaler.js';
+import { createAckAhead, lastSyncTimestamp } from './pacing.js';
 
 // Guacamole protocol: each element is "<length>.<value>", elements are
 // separated by "," and an instruction ends with ";". Lengths count Unicode
@@ -90,7 +91,7 @@ function intParam(value, fallback, min, max) {
 // depth, most RDP experience flags and the requested size, so deskport shapes
 // the picture itself:
 //   quality   low | medium | high | lossless. Low and medium re-encode guacd's
-//             images as JPEG at quality 35 / 60 (see scaler.js); lossless makes
+//             images as WebP at quality 35 / 60 (see scaler.js); lossless makes
 //             guacd send only lossless images.
 //   priority  speed sends every frame; data paces frame acknowledgements so
 //             guacd sends about 10 frames per second.
@@ -99,6 +100,8 @@ function intParam(value, fallback, min, max) {
 const QUALITIES = new Set(['low', 'medium', 'high', 'lossless']);
 const SCALES = new Set(['1', '0.75', '0.5', '0.33']);
 const DATA_SAVER_FRAME_MS = 100;
+// Frames the bridge acknowledges ahead of the browser at Responsiveness (pacing.js); 0 turns it off.
+const ACK_AHEAD = Number(process.env.DESKPORT_ACK_AHEAD ?? 2);
 
 // Screen source:
 //   mirror   the physical monitor (GNOME desktop sharing in mirror-primary mode).
@@ -151,7 +154,7 @@ const BASE_PARAMS = {
   'enable-full-window-drag': 'true',
 };
 
-export function handleScreen(ws, req, { guacd, rdp, session }, log) {
+export function handleScreen(ws, req, { guacd, rdp, session, monitors }, log) {
   const url = new URL(req.url, 'http://localhost');
   const width = intParam(url.searchParams.get('width'), 1280, 320, 7680);
   const height = intParam(url.searchParams.get('height'), 720, 240, 4320);
@@ -167,6 +170,10 @@ export function handleScreen(ws, req, { guacd, rdp, session }, log) {
   const audio = q.get('audio') === '1';
   const minFrameMs = priority === 'data' ? DATA_SAVER_FRAME_MS : 0;
   const source = SOURCES.has(q.get('source')) ? q.get('source') : 'mirror';
+  // My monitor only: "match" changes the monitor's mode to fit this browser
+  // while it is connected; "monitor" names the monitor to show (monitors.js).
+  const match = source === 'mirror' && q.get('match') === '1';
+  const monitor = source === 'mirror' && /^[A-Za-z0-9-]{1,32}$/.test(q.get('monitor') || '') ? q.get('monitor') : 'primary';
   // Extra monitors and the separate desktop are already the browser's size, so
   // they never need shrinking.
   const sized = source !== 'mirror';
@@ -194,9 +201,16 @@ export function handleScreen(ws, req, { guacd, rdp, session }, log) {
     ...(quality === 'lossless' ? { 'force-lossless': 'true' } : {}),
   };
 
+  let releaseMonitors = null;
+  ws.on('close', () => releaseMonitors?.());
   const ready = source === 'session'
     ? session.ensureRunning()
-    : setShareMode(source === 'virtual' ? 'extend' : 'mirror-primary', log);
+    : setShareMode(source === 'virtual' ? 'extend' : 'mirror-primary', log).then(async () => {
+      if (!match && monitor === 'primary') return;
+      const release = await monitors.acquire(match ? { width, height, monitor } : { monitor });
+      if (ws.readyState === ws.OPEN) releaseMonitors = release;
+      else release();
+    });
   ready.then(() => {
     if (ws.readyState === ws.OPEN) connect();
   }, (err) => {
@@ -214,7 +228,16 @@ export function handleScreen(ws, req, { guacd, rdp, session }, log) {
     let handshakeDone = false;
     let lastSync = 0;
     let heldSync = null;
-    const toBrowser = (text) => { if (ws.readyState === ws.OPEN) ws.send(text); };
+    // At Responsiveness, frames are acknowledged to guacd as they leave (pacing.js).
+    const pacer = minFrameMs || !ACK_AHEAD ? null : createAckAhead({
+      max: ACK_AHEAD,
+      ack: (ts) => { if (!socket.destroyed) socket.write(encode(['sync', ts])); },
+    });
+    const toBrowser = (text) => {
+      if (ws.readyState !== ws.OPEN) return;
+      const ts = pacer && lastSyncTimestamp(text);
+      ws.send(text, ts ? (err) => { if (!err) pacer.sent(ts, ws.bufferedAmount); } : undefined);
+    };
     const scaler = reshape
       ? createScaler({
         scale: sized ? 1 : res === 'auto' ? null : Number(res),
@@ -328,6 +351,10 @@ export function handleScreen(ws, req, { guacd, rdp, session }, log) {
       // one, so holding acknowledgements back caps the frame rate. Only the
       // newest held acknowledgement is sent: it covers every frame before it,
       // and queueing each one would add the wait once per frame.
+      if (pacer && msg.startsWith('4.sync,')) {
+        const ts = /^4\.sync,\d+\.(\d+)/.exec(msg)?.[1];
+        if (ts && !pacer.fromBrowser(ts)) return;
+      }
       if (minFrameMs && msg.startsWith('4.sync,')) {
         const wait = lastSync + minFrameMs - Date.now();
         if (wait > 0) {
