@@ -2,6 +2,20 @@
 
 Choices made while building deskport, newest first, with the reason for each. Entries marked *autonomous* were made while the owner was away and asked for choices to be made and logged.
 
+## 2026-11-11 (night)
+
+### Multi-host groundwork, no visible change
+The owner wants deskport to grow into a system where each machine runs its own server, the UI is optional per machine, and one host can control several. Asked for the possibility and stubs only. The server is now split into `api.js`, `ui.js` and `hosts.js`; every endpoint also answers under `/h/<id>/`; `DESKPORT_UI=0` drops the page; `/api/host` describes a host's capabilities; and every URL in the page goes through a host object. Requests for other hosts return 501. The chosen design, forwarding through the controller with a Cloudflare Access service token instead of the browser opening each host directly, and the remaining steps are in docs/multi-host.md.
+
+### Terminal drawn past its area
+The owner saw the terminal and tmux's status bar end up off screen. xterm's fit addon sizes the terminal from its parent's computed height, which with `box-sizing: border-box` includes the parent's padding, and subtracts only the terminal element's own padding. The 20 px of vertical padding on the container therefore made the terminal up to a row too tall (and up to a column too wide). The padding moved onto the terminal element. Checked in phone emulation: the last row ends 19 px above the area's bottom edge and the status bar is fully visible.
+
+### Menus over the Screen view
+On a phone, menus over the Screen view would not scroll, and the remote desktop moved behind them. The screen's touch handlers now act only on touches that started on the screen (tracked by touch identifier), ignore new touches while a menu is open, and end any gesture in progress when the More sheet or Settings opens. Sheets have an explicit maximum height and scroll, and the page itself can no longer scroll or bounce. The gestures themselves are unchanged. Checked in emulation (the More sheet on a landscape phone scrolls through 641 px of content in 347 px); not yet on an iPhone.
+
+### Separate desktop could not reach the systemd user manager
+Terminal apps in the separate desktop failed with "Failed to connect to user scope bus via local transport". They start shells in systemd scopes, which needs `$XDG_RUNTIME_DIR/systemd/private`, and the private runtime directory had none. Every per-user entry in the real runtime directory is now linked into the private one, except those that belong to one desktop session. Reproduced the error with `systemd-run --user --scope` and confirmed the link fixes it. It applies the next time the separate desktop starts.
+
 ## 2026-11-11 (evening)
 
 ### Separate desktop instead of fixing the extra monitor

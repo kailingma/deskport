@@ -1,18 +1,25 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { config, validateConfig } from './config.js';
 import { createAuthenticator, AuthError, sameOrigin } from './auth.js';
-import { handleScreen } from './guac.js';
+import { handleScreen, SCREEN_SOURCES } from './guac.js';
 import { handleTerminal } from './terminal.js';
 import { createSessionControl } from './session.js';
+import { createHostRegistry, routeFor } from './hosts.js';
+import { createApi } from './api.js';
+import { createUi } from './ui.js';
+
+// Starts one deskport host: authentication and security headers, the API, the
+// web page (unless DESKPORT_UI=0), and the screen and terminal WebSockets.
+// Requests may be addressed to this host directly (/api/..., /ws/...) or by id
+// (/h/<id>/api/..., /h/<id>/ws/...); ids of other hosts get 501 for now.
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const { version } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const log = (msg) => console.log(`[deskport] ${msg}`);
 
 const problems = validateConfig();
@@ -21,8 +28,19 @@ if (problems.length) {
   process.exit(1);
 }
 if (config.insecureDev) log('WARNING: DESKPORT_INSECURE_DEV=1, Cloudflare Access checks are OFF');
+if (!config.ui) log('DESKPORT_UI=0: serving the API and WebSockets only, no web page');
 
 const authenticate = createAuthenticator(config);
+const hosts = createHostRegistry({ config, sources: SCREEN_SOURCES, version, log });
+const session = createSessionControl({
+  unit: config.rdp.sessionUnit,
+  host: config.rdp.hostname,
+  port: config.rdp.sessionPort,
+  log,
+});
+
+// ---------- HTTP ----------
+
 const app = express();
 app.disable('x-powered-by');
 
@@ -48,85 +66,23 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/api/me', (req, res) => {
-  res.json({ email: req.user.email, host: os.hostname(), dev: Boolean(req.user.dev) });
-});
+const api = createApi({ hosts, session });
+app.use(api);
+app.use('/h/:hostId', (req, res, next) => {
+  const host = hosts.get(req.params.hostId);
+  if (!host) return res.status(404).json({ error: 'unknown host' });
+  if (!host.local) return res.status(501).json({ error: 'controlling other hosts is not implemented yet' });
+  next();
+}, api);
 
-const session = createSessionControl({
-  unit: config.rdp.sessionUnit,
-  host: config.rdp.hostname,
-  port: config.rdp.sessionPort,
-  log,
-});
-app.get('/api/session', async (req, res) => {
-  res.set('Cache-Control', 'no-store').json(await session.state());
-});
-app.post('/api/session/stop', async (req, res) => {
-  if (!sameOrigin(req)) return res.status(403).json({ error: 'cross-origin request' });
-  try {
-    await session.stop();
-    res.json(await session.state());
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-const vendor = {
-  '/vendor/guacamole-common.js': 'node_modules/guacamole-common-js/dist/esm/guacamole-common.min.js',
-  '/vendor/xterm.mjs': 'node_modules/@xterm/xterm/lib/xterm.mjs',
-  '/vendor/xterm.css': 'node_modules/@xterm/xterm/css/xterm.css',
-  '/vendor/addon-fit.mjs': 'node_modules/@xterm/addon-fit/lib/addon-fit.mjs',
-  '/vendor/addon-web-links.mjs': 'node_modules/@xterm/addon-web-links/lib/addon-web-links.mjs',
-  '/vendor/inter.woff2': 'node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2',
-  '/vendor/jetbrains-mono.woff2': 'node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2',
-  '/vendor/ibm-plex-mono-400.woff2': 'node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2',
-  '/vendor/ibm-plex-mono-600.woff2': 'node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2',
-};
-for (const [route, file] of Object.entries(vendor)) {
-  app.get(route, (req, res) => res.sendFile(path.join(root, file), { maxAge: '1d' }));
-}
-
-// Page assets are served under /v/<content hash>/ so a deploy can never mix a new
-// page with cached old CSS or JS (iOS home-screen apps cache aggressively).
-// Relative imports inside app.js resolve under the same prefix.
-const publicDir = path.join(root, 'public');
-
-function assetVersion(dir) {
-  const hash = crypto.createHash('sha1');
-  const walk = (d) => {
-    for (const name of fs.readdirSync(d).sort()) {
-      const file = path.join(d, name);
-      if (fs.statSync(file).isDirectory()) walk(file);
-      else hash.update(name).update(fs.readFileSync(file));
-    }
-  };
-  walk(dir);
-  return hash.digest('hex').slice(0, 12);
-}
-
-function renderIndex(version) {
-  return fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8')
-    .replace(/(href|src)="\/(style\.css|app\.js|theme-init\.js)"/g, `$1="/v/${version}/$2"`);
-}
-
-// In dev, files change under a running server, so build the page per request.
-const staticVersion = config.insecureDev ? null : assetVersion(publicDir);
-const staticIndex = staticVersion && renderIndex(staticVersion);
-
-app.get(['/', '/index.html'], (req, res) => {
-  res.set('Cache-Control', 'no-cache').type('html').send(staticIndex ?? renderIndex('dev'));
-});
-app.use('/v/:version', express.static(publicDir, {
-  index: false,
-  ...(staticVersion ? { immutable: true, maxAge: '365d' } : { setHeaders: (r) => r.set('Cache-Control', 'no-cache') }),
-}));
-app.use(express.static(publicDir, { index: false, setHeaders: (r) => r.set('Cache-Control', 'no-cache') }));
+if (config.ui) app.use(createUi({ root, dev: config.insecureDev }));
 
 app.use((err, req, res, _next) => {
   log(`error: ${err.stack || err}`);
   res.status(500).type('text/plain').send('Internal error');
 });
+
+// ---------- WebSockets ----------
 
 const server = http.createServer(app);
 const screenWss = new WebSocketServer({
@@ -136,6 +92,10 @@ const screenWss = new WebSocketServer({
   handleProtocols: (protocols) => (protocols.has('guacamole') ? 'guacamole' : false),
 });
 const termWss = new WebSocketServer({ noServer: true });
+const endpoints = {
+  '/ws/screen': { wss: screenWss, open: (ws, req) => handleScreen(ws, req, { ...config, session }, log) },
+  '/ws/term': { wss: termWss, open: (ws) => handleTerminal(ws, config.terminal, log) },
+};
 
 function reject(socket, status, text) {
   socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -144,8 +104,10 @@ function reject(socket, status, text) {
 
 server.on('upgrade', async (req, socket, head) => {
   const { pathname } = new URL(req.url, 'http://localhost');
-  const target = pathname === '/ws/screen' ? screenWss : pathname === '/ws/term' ? termWss : null;
-  if (!target) return reject(socket, 404, 'Not Found');
+  const route = routeFor(pathname);
+  const endpoint = endpoints[route.path];
+  const host = hosts.get(route.hostId);
+  if (!endpoint || !host) return reject(socket, 404, 'Not Found');
   if (!sameOrigin(req)) {
     log(`denied upgrade ${pathname}: origin ${req.headers.origin} does not match host ${req.headers.host}`);
     return reject(socket, 403, 'Forbidden');
@@ -156,15 +118,18 @@ server.on('upgrade', async (req, socket, head) => {
     log(`denied upgrade ${pathname}: ${err.message}`);
     return reject(socket, 403, 'Forbidden');
   }
-  target.handleUpgrade(req, socket, head, (ws) => {
+  if (!host.local) {
+    log(`denied upgrade ${pathname}: controlling other hosts is not implemented yet`);
+    return reject(socket, 501, 'Not Implemented');
+  }
+  endpoint.wss.handleUpgrade(req, socket, head, (ws) => {
     log(`${pathname} opened by ${req.user.email}`);
-    if (target === screenWss) handleScreen(ws, req, { ...config, session }, log);
-    else handleTerminal(ws, config.terminal, log);
+    endpoint.open(ws, req);
   });
 });
 
 server.listen(config.port, config.host, () => {
-  log(`listening on http://${config.host}:${config.port}`);
+  log(`host "${hosts.self.id}" listening on http://${config.host}:${config.port}`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

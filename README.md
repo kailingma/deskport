@@ -135,6 +135,7 @@ Configuration lives outside the repo in `~/.config/deskport/` (see [deskport.env
 - [PRODUCT.md](PRODUCT.md): who it is for and the constraints the UI follows.
 - [DESIGN.md](DESIGN.md): the design system.
 - [docs/decisions.md](docs/decisions.md): why things are the way they are.
+- [docs/multi-host.md](docs/multi-host.md): the planned design for one UI controlling several machines, and the groundwork for it that exists now.
 
 ## Development
 

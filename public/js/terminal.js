@@ -17,7 +17,7 @@ const MOVE_SLOP = 10;
  * synthetic wheel and mouse events, so xterm encodes them for whatever mouse
  * mode the program inside has asked for.
  */
-export function createTerminal({ wsBase, setStatus }) {
+export function createTerminal({ host, setStatus }) {
   const el = document.getElementById('term');
   const view = document.getElementById('view-term');
   const xterm = new Terminal({
@@ -175,7 +175,7 @@ export function createTerminal({ wsBase, setStatus }) {
       applyFont();
     }
     setStatus('term', 'busy', 'Connecting');
-    ws = new WebSocket(`${wsBase}/ws/term`);
+    ws = new WebSocket(host.ws('/ws/term'));
     ws.onopen = () => {
       retry = 0;
       setStatus('term', 'ok', 'Connected');

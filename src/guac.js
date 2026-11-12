@@ -108,7 +108,8 @@ const DATA_SAVER_FRAME_MS = 100;
 //            monitor, so it has no top bar; windows have to be moved onto it.
 //   session  a separate headless GNOME desktop on its own RDP port
 //            (session.js), with one monitor sized to the browser.
-const SOURCES = new Set(['mirror', 'virtual', 'session']);
+export const SCREEN_SOURCES = ['mirror', 'virtual', 'session'];
+const SOURCES = new Set(SCREEN_SOURCES);
 
 // GNOME offers a monitor scale only if the scaled desktop keeps at least this
 // many logical pixels, and virtual monitors only get whole-number scales here.

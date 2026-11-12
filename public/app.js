@@ -3,9 +3,11 @@ import { TERMINAL_THEMES, TERMINAL_FONTS } from './js/themes.js';
 import { toggleMod } from './js/keys.js';
 import { createScreen } from './js/screen.js';
 import { createTerminal } from './js/terminal.js';
+import { localHost } from './js/host.js';
 
 const $ = (id) => document.getElementById(id);
-const wsBase = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+// One host for now: the server that served this page (docs/multi-host.md).
+const host = localHost;
 const canFullscreen = Boolean(document.fullscreenEnabled);
 const coarse = matchMedia('(pointer: coarse)');
 // Running from a Home Screen icon: no browser bars to hide.
@@ -40,14 +42,14 @@ function toast(text) {
 }
 
 let me = null;
-fetch('/api/me').then((r) => r.json()).then((data) => {
+host.json('/api/me').then((data) => {
   me = data;
   $('host').textContent = me.dev ? `${me.host} (dev)` : me.host;
   document.title = `${me.host} · deskport`;
 }).catch(() => {});
 
-const screen = createScreen({ wsBase, setStatus, toast });
-const term = createTerminal({ wsBase, setStatus });
+const screen = createScreen({ host, setStatus, toast });
+const term = createTerminal({ host, setStatus });
 
 // ---------- views ----------
 
@@ -232,6 +234,7 @@ settingsDialog.addEventListener('close', () => {
 });
 
 function openSettings() {
+  screen.cancelGesture();
   screenAtOpen = screenSettings();
   syncSettingsForm();
   refreshSession();
@@ -243,7 +246,7 @@ function openSettings() {
 async function refreshSession() {
   const row = $('session-row');
   try {
-    const s = await (await fetch('/api/session')).json();
+    const s = await host.json('/api/session');
     row.hidden = s.state === 'stopped' && settings.get('source') !== 'session';
     $('session-state').textContent = {
       running: `Running${s.memoryMB ? ` and using ${s.memoryMB} MB of memory` : ''}. Apps in it keep running after you disconnect.`,
@@ -261,8 +264,7 @@ async function endSession() {
   if (!confirm('End the separate desktop? Apps open in it will close.')) return;
   $('end-session').disabled = true;
   try {
-    const r = await fetch('/api/session/stop', { method: 'POST' });
-    if (!r.ok) throw new Error((await r.json()).error);
+    await host.json('/api/session/stop', { method: 'POST' });
     toast('Separate desktop ended');
     if (settings.get('source') === 'session') screen.markStale();
   } catch (err) {
@@ -331,7 +333,7 @@ const actions = {
   fullscreen: toggleFullscreen,
   reconnect: () => (view === 'screen' ? screen.reconnect() : term.reconnect()),
   keyboard: () => (view === 'screen' ? screen.showKeyboard() : term.focus()),
-  sheet: () => sheet.showModal(),
+  sheet: () => { screen.cancelGesture(); sheet.showModal(); },
   'close-sheet': () => sheet.close(),
   settings: openSettings,
   'close-settings': () => settingsDialog.close(),

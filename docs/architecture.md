@@ -14,7 +14,10 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | --- | --- |
 | `src/config.js` | Loads `deskport.env` and `rdp.env` from `~/.config/deskport` (or `DESKPORT_CONFIG_DIR`), builds the config object, and validates it. Variables already in the environment win over the files. |
 | `src/auth.js` | Verifies the Cloudflare Access JWT, and checks WebSocket `Origin`. |
-| `src/server.js` | Express app, security headers, `/api/me`, `/vendor/*` routes, the page and its assets under `/v/<content hash>/` (so browsers never mix old and new files), and the WebSocket upgrade router. |
+| `src/server.js` | Starts one host: authentication, security headers, and wiring of the API, the UI and the WebSocket upgrade router (by host and endpoint). |
+| `src/api.js` | The JSON API of one host: `/api/me`, `/api/host`, `/api/hosts`, `/api/session`, `/api/session/stop`. |
+| `src/ui.js` | The page, its assets under `/v/<content hash>/` (so browsers never mix old and new files), and `/vendor/*`. Not mounted when `DESKPORT_UI=0`. |
+| `src/hosts.js` | This host's identity, the list of other hosts, and `/h/<id>/` path routing (multi-host groundwork, see [multi-host.md](multi-host.md)). |
 | `src/guac.js` | Guacamole protocol encoder and parser, and the bridge between a browser WebSocket and a guacd TCP connection. |
 | `src/scaler.js` | Shrinks and re-encodes the screen stream for the Resolution and Quality settings. |
 | `src/session.js` | Starts, checks and stops the separate desktop's systemd unit, and sets its monitor scale. |
@@ -22,11 +25,16 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | `public/app.js` | Entry point: views, full screen and the floating toolbar, settings dialog, key row, viewport handling. |
 | `public/js/screen.js` | Screen view: Guacamole client, scaling and zoom, touch gestures, soft keyboard. |
 | `public/js/terminal.js` | Terminal view: xterm.js, reconnects, touch scrolling and selection, appearance settings. |
+| `public/js/host.js` | The host a view talks to: builds every API and WebSocket URL, with an `/h/<id>` prefix for other hosts later. |
 | `public/js/settings.js`, `themes.js`, `keys.js`, `gestures.js` | Per-device settings store, terminal colour schemes and fonts, key codes and sticky modifiers, scroll momentum. |
 | `public/` (rest) | `index.html`, `style.css`, `theme-init.js` (applies a saved light/dark choice before first paint), icons, manifest. No build step. |
 | `scripts/` | `setup-rdp.sh`, `install-services.sh`, `desktop-session.sh` (the separate desktop), `session-scale.py` (sets its monitor scale), `make-icons.mjs`, `measure-screen.mjs`, `measure-typing.mjs`. |
 | `deploy/` | guacd compose file and the cloudflared config example. |
-| `test/` | `node --test` tests for the protocol parser and the scaler. |
+| `test/` | `node --test` tests for the protocol parser, the scaler, the separate desktop's size and scale, and the host registry. |
+
+## Hosts and paths
+
+Every endpoint can be addressed two ways: directly (`/api/host`, `/ws/screen`) or by host id (`/h/<id>/api/host`, `/h/<id>/ws/screen`). The id `local` and this host's own id (`DESKPORT_HOST_ID`, default the hostname as a slug) both mean this host. Ids listed in `hosts.json` get 501 Not Implemented, and other ids 404. This is the groundwork for one UI controlling several machines; [multi-host.md](multi-host.md) has the design.
 
 ## Authentication
 
@@ -80,7 +88,7 @@ The scaler never shrinks `virtual` or `session` pictures; they are already the b
 
 `scripts/desktop-session.sh` runs a second GNOME Shell for the same user with `gnome-shell --headless` (no physical outputs, so it cannot touch the monitors) and `gnome-remote-desktop-daemon --headless` on port 3391. Each RDP client gets its own virtual monitor, sized to the client and resized with it.
 
-Two GNOME Shells for one user would collide on the session bus and in the runtime directory, so the script gives this one:
+Two GNOME Shells for one user would collide on the session bus and in the runtime directory, so the script gives this one the following. Everything else in the real runtime directory (the systemd user manager's sockets, snap and flatpak directories, gnupg, keyring and ssh agents, PipeWire, PulseAudio) is linked into the private one, so apps there can start in systemd scopes and snaps keep their confinement paths.
 
 - a private D-Bus session bus at `$XDG_RUNTIME_DIR/deskport-session/bus`, whose service directory lists every session service except file indexing (Tracker/LocalSearch) and `systemd1`;
 - a private runtime directory, `$XDG_RUNTIME_DIR/deskport-session`, for its Wayland socket, accessibility bus, portals, dconf notifications and gvfs mounts. (Without it, the second session's accessibility bus replaced the main one's socket.) PipeWire, PulseAudio and the keyring point back at the main session's sockets.

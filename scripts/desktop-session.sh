@@ -16,6 +16,21 @@ rm -rf "$services" "$dir/bus"
 mkdir -p "$services"
 chmod 700 "$dir"
 
+# Everything per-user in the real runtime directory is shared through links:
+# the systemd user manager (apps start in its scopes), snap and flatpak
+# directories, gnupg, the keyring and ssh agents, PipeWire, PulseAudio. Only
+# what belongs to one desktop session stays private.
+private='^(bus|wayland-.*|at-spi|dconf|doc|gvfs|gvfsd|gnome-shell.*|gnome-remote-desktop|gnome-session-.*|dbus-1|deskport-session)$'
+for f in "$dir"/*; do
+  [ -L "$f" ] && rm -f "$f"
+done
+for f in "$uid_dir"/* "$uid_dir"/.[!.]*; do
+  [ -e "$f" ] || continue
+  name=$(basename "$f")
+  printf '%s\n' "$name" | grep -qE "$private" && continue
+  [ -e "$dir/$name" ] || ln -s "$f" "$dir/$name"
+done
+
 # D-Bus services the private bus may start: every session service, minus ones
 # that must exist only once per user.
 skip='^org\.freedesktop\.(Tracker3|LocalSearch3)\.|^org\.freedesktop\.systemd1\.'

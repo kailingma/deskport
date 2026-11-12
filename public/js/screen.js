@@ -20,7 +20,7 @@ const MOVE_SLOP = 10;
  *   long press, release      right click
  *   two-finger tap           right click
  */
-export function createScreen({ wsBase, setStatus, toast }) {
+export function createScreen({ host, setStatus, toast }) {
   const wrap = $('display-wrap');
   const ime = $('screen-ime');
   const ring = $('touch-ring');
@@ -124,8 +124,29 @@ export function createScreen({ wsBase, setStatus, toast }) {
     };
   }
 
+  // Touches that started on the screen. Move and end events are watched on the
+  // window, so this keeps touches on menus and sheets (which can sit over the
+  // screen) from steering the remote desktop.
+  const tracked = new Set();
+  const ours = (e) => [...e.changedTouches].some((t) => tracked.has(t.identifier));
+  const forget = (e) => {
+    for (const t of e.changedTouches) tracked.delete(t.identifier);
+    if (!e.touches.length) tracked.clear();
+  };
+
+  /** Ends any gesture in progress, e.g. when a menu opens over the screen. */
+  function cancelGesture() {
+    if (g?.timer) clearTimeout(g.timer);
+    if (g?.mode === 'drag') mouse(g.x, g.y);
+    scroller.stop();
+    hideRing();
+    tracked.clear();
+    g = null;
+  }
+
   function onTouchStart(e) {
-    if (!client) return;
+    if (!client || document.querySelector('dialog[open]')) return;
+    for (const t of e.changedTouches) tracked.add(t.identifier);
     e.stopPropagation();
     e.preventDefault();
     scroller.stop();
@@ -158,7 +179,7 @@ export function createScreen({ wsBase, setStatus, toast }) {
   }
 
   function onTouchMove(e) {
-    if (!g) return;
+    if (!g || !ours(e)) return;
     if (document.getElementById('view-screen').hidden) { g = null; return; }
     e.preventDefault();
     const t = e.touches;
@@ -221,6 +242,8 @@ export function createScreen({ wsBase, setStatus, toast }) {
   }
 
   function onTouchEnd(e) {
+    if (!ours(e)) return;
+    forget(e);
     if (!g) return;
     if (document.getElementById('view-screen').hidden) { g = null; return; }
     e.preventDefault();
@@ -260,7 +283,7 @@ export function createScreen({ wsBase, setStatus, toast }) {
     zoom = 1;
     $('screen-overlay').hidden = true;
 
-    const tunnel = new Guacamole.WebSocketTunnel(`${wsBase}/ws/screen`);
+    const tunnel = new Guacamole.WebSocketTunnel(host.ws('/ws/screen'));
     const c = new Guacamole.Client(tunnel);
     client = c;
     const display = c.getDisplay();
@@ -422,6 +445,7 @@ export function createScreen({ wsBase, setStatus, toast }) {
     sendClipboard,
     rescale,
     resetZoom() { zoom = 1; rescale(); },
+    cancelGesture,
     /** Size of the picture being received, or null before the first frame. */
     pictureSize() {
       const d = client?.getDisplay();

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { slugify } from './hosts.js';
 
 const configDir = process.env.DESKPORT_CONFIG_DIR || path.join(os.homedir(), '.config', 'deskport');
 
@@ -21,6 +22,17 @@ export const config = {
   host: env.DESKPORT_HOST || '127.0.0.1',
   port: Number(env.DESKPORT_PORT || 7900),
   insecureDev: env.DESKPORT_INSECURE_DEV === '1',
+
+  // This machine in a multi-host setup (docs/multi-host.md). The id appears in
+  // /h/<id>/ paths, so it is a slug; the name is what a UI shows.
+  self: {
+    id: slugify(env.DESKPORT_HOST_ID || os.hostname()),
+    name: env.DESKPORT_HOST_NAME || os.hostname(),
+  },
+  // DESKPORT_UI=0 runs the server without the web page: only the API and the
+  // WebSockets, for a machine that another host's UI will control.
+  ui: env.DESKPORT_UI !== '0',
+  hostsFile: path.join(configDir, 'hosts.json'),
 
   access: {
     // e.g. "myteam.cloudflareaccess.com"
