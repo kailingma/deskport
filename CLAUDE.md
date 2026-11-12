@@ -33,11 +33,12 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 - Guacamole element lengths count code points, and `WebSocketTunnel` needs whole instructions per WebSocket frame.
 - xterm's fit addon measures the terminal's parent including padding. Keep xterm inside the unpadded `.term-box`. Its viewport defaults to a black background, and xterm 6 draws its own scrollbar.
 - Screen touch: Guacamole replaces canvas layers mid-gesture, so move and end are handled on the window and filtered by touch identifier. Synthetic wheel events use `DOM_DELTA_LINE`. The owner is happy with the current gestures; fix around them rather than reworking them.
+- tmux closes its right-click menu when the button's release reaches it, and reads a button-less mouse motion as a release. The terminal's touch right click therefore sends only the press (`rightClick()` in `public/js/terminal.js`).
 - iOS: assets are served under content-hash paths because Home Screen apps cache hard. A Home Screen app has its own cookies. iPhone Safari has no Fullscreen API. The CSP blocks inline scripts.
 
 ## Open items
 
-- Not yet confirmed on an iPhone: menus scrolling over the Screen view, the separate desktop at scale 2, the phone layout without a top bar, and the Add to Home Screen path.
+- Not yet confirmed on an iPhone: copying a touch selection in the Terminal (the clipboard write waits on tmux), tmux's menu by long press or two-finger tap, xdg-open links from a Home Screen app, menus scrolling over the Screen view, the separate desktop at scale 2, the phone layout without a top bar, and the Add to Home Screen path.
 - Multi-host: the steps under "What is left" in docs/multi-host.md.
 - Separate desktop: Chromium browsers open on the main desktop while one is open there (one profile per process). A snap opened there holds its profile, so the same snap cannot start on the main desktop until it is closed.
 - Match this device (My monitor) has never been run against the physical monitor. Never turn it on in a test; only the owner does.

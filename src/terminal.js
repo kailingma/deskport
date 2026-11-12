@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import pty from 'node-pty';
 
 const SECRET_PREFIXES = ['RDP_', 'CF_ACCESS_', 'DESKPORT_', 'GUACD_'];
@@ -12,6 +13,40 @@ const BATCH_MS = 4;
 const FLOW_HIGH = Number(process.env.DESKPORT_TERM_WINDOW || 128 * 1024);
 const FLOW_LOW = FLOW_HIGH / 2;
 const PING_MS = 25000;
+
+/**
+ * Variables for the tmux session's new windows and panes: binDir first on
+ * PATH, and its xdg-open as BROWSER. Shells that are already running keep
+ * their own.
+ */
+export function sessionVars(binDir, basePath) {
+  const path = [binDir, ...basePath.split(':').filter((p) => p && p !== binDir)].join(':');
+  return { PATH: path, BROWSER: `${binDir}/xdg-open` };
+}
+
+/**
+ * Arguments for the tmux client: attach to (or create) the session and set
+ * the session's variables. tmux gives the first pane of a new session the
+ * client's own PATH, so the client is started with the same variables.
+ */
+export function tmuxArgs(session, cwd, vars) {
+  const target = `=${session}`;
+  return [
+    'new-session', '-A', '-s', session, '-c', cwd,
+    ...Object.entries(vars).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
+    ...Object.entries(vars).flatMap(([k, v]) => [';', 'set-environment', '-t', target, k, v]),
+  ];
+}
+
+/** The PATH tmux gives new panes, before this bridge changes it. */
+function tmuxPath() {
+  try {
+    const line = execFileSync('tmux', ['show-environment', '-g', 'PATH'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return line.trim().replace(/^PATH=/, '');
+  } catch {
+    return process.env.PATH || '/usr/local/bin:/usr/bin:/bin';
+  }
+}
 
 function shellEnv() {
   const env = {};
@@ -30,19 +65,24 @@ function shellEnv() {
  * Client -> server: JSON {type:"input", data} | {type:"resize", cols, rows}
  *   and, with ?flow=1, {type:"ack", chars} once output has been drawn (chars
  *   counts JavaScript string length) and {type:"ping", id}.
- * Server -> client: terminal output as text frames; with ?flow=1, replies to
- *   pings as binary frames holding JSON {type:"pong", id}.
+ * Server -> client: terminal output as text frames, and binary frames holding
+ *   JSON: {type:"open", url, label, file?} when a program in the terminal runs
+ *   xdg-open (src/opener.js), and with ?flow=1 {type:"pong", id}.
  */
-export function handleTerminal(ws, req, { tmuxSession, cwd }, log) {
+export function handleTerminal(ws, req, { tmuxSession, cwd, binDir, opener }, log) {
   const flow = new URL(req.url, 'http://localhost').searchParams.get('flow') === '1';
-  const term = pty.spawn('tmux', ['new-session', '-A', '-s', tmuxSession, '-c', cwd], {
+  const vars = sessionVars(binDir, tmuxPath());
+  const term = pty.spawn('tmux', tmuxArgs(tmuxSession, cwd, vars), {
     name: 'xterm-256color',
     cols: 100,
     rows: 30,
     cwd,
-    env: shellEnv(),
+    env: { ...shellEnv(), ...vars },
   });
   log(`terminal: attached to tmux session "${tmuxSession}" (pid ${term.pid}${flow ? ', flow control' : ''})`);
+
+  const control = (msg) => { if (ws.readyState === ws.OPEN) ws.send(Buffer.from(JSON.stringify(msg)), { binary: true }); };
+  const unregister = opener ? opener.register(term.pid, control) : () => {};
 
   let pending = '';
   let timer = null;
@@ -101,11 +141,12 @@ export function handleTerminal(ws, req, { tmuxSession, cwd }, log) {
         term.resume();
       }
     } else if (flow && msg.type === 'ping') {
-      if (ws.readyState === ws.OPEN) ws.send(Buffer.from(JSON.stringify({ type: 'pong', id: msg.id })), { binary: true });
+      control({ type: 'pong', id: msg.id });
     }
   });
 
   ws.on('close', () => {
+    unregister();
     clearInterval(ping);
     clearTimeout(timer);
     try {

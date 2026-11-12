@@ -78,6 +78,12 @@
         </button>
         <span class="divider" aria-hidden="true"></span>
       </div>
+      <div class="tools term-only">
+        <button class="btn-icon" data-action="paste" title="Paste into the terminal (Ctrl+Shift+V)" aria-label="Paste">
+          <svg class="icon"><use href="#i-clipboard"/></svg>
+        </button>
+        <span class="divider" aria-hidden="true"></span>
+      </div>
       <button class="btn-icon" data-action="settings" title="Settings" aria-label="Settings">
         <svg class="icon"><use href="#i-sliders"/></svg>
       </button>
@@ -122,6 +128,7 @@
     <button class="key" data-key="-">-</button>
     <button class="key" data-key="|">|</button>
     <button class="key" data-key="~">~</button>
+    <button class="key term-only" data-action="paste">Paste</button>
   </div>
 
   <nav class="tabbar" aria-label="View">
@@ -149,6 +156,7 @@
     <h2 class="sheet-title" id="sheet-title">Actions</h2>
     <div class="sheet-list">
       <button class="sheet-item" data-action="keyboard"><svg class="icon"><use href="#i-keyboard"/></svg>Show keyboard</button>
+      <button class="sheet-item term-only" data-action="paste"><svg class="icon"><use href="#i-clipboard"/></svg>Paste</button>
       <button class="sheet-item screen-only" data-action="clipboard"><svg class="icon"><use href="#i-clipboard"/></svg>Send clipboard</button>
       <button class="sheet-item screen-only" data-action="super"><svg class="icon"><use href="#i-grid"/></svg>Press Super</button>
       <button class="sheet-item screen-only" data-action="cad"><svg class="icon"><use href="#i-power"/></svg>Send Ctrl+Alt+Delete</button>

@@ -34,12 +34,29 @@ function setStatus(which, state, text) {
 }
 
 let toastTimer;
-function toast(text) {
+/**
+ * Shows a short message. With an action, the toast holds a button (or, with
+ * href, a link that opens in a new tab) and stays up longer; browsers only
+ * let a page open tabs and write the clipboard from a tap or click.
+ */
+function toast(text, { action, ms } = {}) {
   const el = $('toast');
-  el.textContent = text;
+  el.replaceChildren(Object.assign(document.createElement('span'), { className: 'toast-text', textContent: text }));
+  el.classList.toggle('has-action', Boolean(action));
+  if (action) {
+    const btn = document.createElement(action.href ? 'a' : 'button');
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    if (action.href) Object.assign(btn, { href: action.href, target: '_blank', rel: 'noopener noreferrer' });
+    btn.addEventListener('click', () => {
+      action.onClick?.();
+      el.classList.remove('show');
+    });
+    el.append(btn);
+  }
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms ?? (action ? 15000 : 2400));
 }
 
 let me = null;
@@ -50,7 +67,7 @@ host.json('/api/me').then((data) => {
 }).catch(() => {});
 
 const screen = createScreen({ host, setStatus, toast });
-const term = createTerminal({ host, setStatus });
+const term = createTerminal({ host, setStatus, toast });
 
 // ---------- views ----------
 
@@ -403,6 +420,7 @@ const sheet = $('sheet');
 
 const actions = {
   clipboard: () => screen.sendClipboard(),
+  paste: () => term.paste(),
   super: () => screen.superKey(),
   cad: () => screen.ctrlAltDel(),
   fullscreen: toggleFullscreen,
@@ -438,6 +456,7 @@ keyrow.addEventListener('click', (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   if (btn.dataset.mod) return toggleMod(btn.dataset.mod);
+  if (btn.dataset.action) return;
   (view === 'screen' ? screen : term).key(btn.dataset.key);
 });
 

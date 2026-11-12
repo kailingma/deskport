@@ -17,16 +17,26 @@ const ACK_MS = 50;
 // connection is dead (phones drop sockets silently in the background).
 const PING_MS = 15000;
 const PONG_MS = 5000;
+// How long a touch selection waits for tmux to send the copied text back.
+const COPY_WAIT_MS = 5000;
+const TWO_TAP_MS = 350;
+// Links the page will offer from xdg-open (src/opener.js).
+const OPENABLE = /^(https?:|mailto:|tel:|sms:|\/api\/files\/)/i;
 
 /**
  * The Terminal view: xterm.js attached to tmux over a WebSocket.
  *
  * Touch: drag scrolls (tmux scrollback when tmux has the mouse, otherwise
- * xterm's own), long press then drag selects. Both are delivered to xterm as
- * synthetic wheel and mouse events, so xterm encodes them for whatever mouse
- * mode the program inside has asked for.
+ * xterm's own), long press then drag selects and copies, long press and
+ * release or a two-finger tap is a right click (tmux's menu). All are
+ * delivered to xterm as synthetic wheel and mouse events, so xterm encodes
+ * them for whatever mouse mode the program inside has asked for.
+ *
+ * Clipboard: programs copy with OSC 52, which tmux forwards when it copies a
+ * selection. Paste reads the browser's clipboard and pastes it as one
+ * bracketed paste.
  */
-export function createTerminal({ host, setStatus }) {
+export function createTerminal({ host, setStatus, toast }) {
   const el = document.getElementById('term');
   const view = document.getElementById('view-term');
   // xterm goes in an unpadded box so the fit addon measures the real space.
@@ -53,8 +63,11 @@ export function createTerminal({ host, setStatus }) {
 
   const send = (msg) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
 
+  let pasting = false;
+
   // Apply sticky Ctrl / Alt from the key row to the next input.
   function input(data) {
+    if (pasting) return send({ type: 'input', data });
     const m = takeMods();
     if (m.ctrl && data.length === 1) {
       const c = data.toUpperCase().charCodeAt(0);
@@ -98,6 +111,106 @@ export function createTerminal({ host, setStatus }) {
     else if (key === 'cursorBlink') xterm.options.cursorBlink = value;
   });
 
+  // ---------- clipboard ----------
+
+  let pendingCopy = null;
+
+  function copied(text) {
+    toast(`Copied ${text.length} character${text.length === 1 ? '' : 's'}`);
+  }
+
+  // Outside a tap or click, iPhone Safari refuses clipboard writes; the toast's
+  // button makes one.
+  function copyText(text) {
+    const offer = () => toast('Copied in the terminal', {
+      action: { label: 'Copy', onClick: () => navigator.clipboard?.writeText(text).then(() => copied(text), () => toast('The browser blocked the clipboard')) },
+    });
+    if (!navigator.clipboard) return offer();
+    navigator.clipboard.writeText(text).then(() => copied(text), offer);
+  }
+
+  // A touch selection ends inside the gesture, but tmux copies it a round trip
+  // later. A clipboard write started now with a promise of the text keeps the
+  // gesture's permission until the text arrives.
+  function copyAfterSelect() {
+    if (xterm.modes.mouseTrackingMode === 'none') {
+      const text = xterm.getSelection();
+      if (text) copyText(text);
+      return;
+    }
+    if (!navigator.clipboard?.write || !window.ClipboardItem) return;
+    pendingCopy?.reject(new Error('replaced'));
+    let job;
+    const text = new Promise((resolve, reject) => { job = { resolve, reject, text: null }; });
+    text.catch(() => {});
+    job.timer = setTimeout(() => { if (pendingCopy === job) pendingCopy = null; job.reject(new Error('nothing copied')); }, COPY_WAIT_MS);
+    pendingCopy = job;
+    const blob = text.then((t) => new Blob([t], { type: 'text/plain' }));
+    navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]).then(
+      () => copied(job.text),
+      () => { if (job.text) copyText(job.text); },
+    );
+  }
+
+  xterm.parser.registerOscHandler(52, (data) => {
+    const b64 = data.slice(data.indexOf(';') + 1);
+    // "?" asks for the clipboard; tmux answers that itself from its buffer.
+    if (!b64 || b64 === '?') return true;
+    let text;
+    try {
+      text = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    } catch {
+      return true;
+    }
+    if (pendingCopy) {
+      const job = pendingCopy;
+      pendingCopy = null;
+      clearTimeout(job.timer);
+      job.text = text;
+      job.resolve(text);
+    } else {
+      copyText(text);
+    }
+    return true;
+  });
+
+  async function paste() {
+    // With a mouse, typing goes to the terminal again right away; on touch,
+    // focusing it would open the on-screen keyboard.
+    if (matchMedia('(pointer: fine)').matches) xterm.focus();
+    let text;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      toast('The browser did not allow reading the clipboard');
+      return;
+    }
+    if (!text) return toast('The clipboard is empty');
+    pasting = true;
+    try { xterm.paste(text); } finally { pasting = false; }
+  }
+
+  // Ctrl+Shift+C copies xterm's own selection (Shift+drag while a program has
+  // the mouse); Ctrl+Shift+V is left to the browser, which pastes.
+  xterm.attachCustomKeyEventHandler((e) => {
+    if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true;
+    if (e.code === 'KeyC') {
+      if (e.type === 'keydown') {
+        const text = xterm.getSelection();
+        if (text) copyText(text);
+      }
+      e.preventDefault();
+      return false;
+    }
+    return e.code !== 'KeyV';
+  });
+
+  // While a program has the mouse, right click goes to it (tmux opens its
+  // menu) instead of opening the browser's.
+  el.addEventListener('contextmenu', (e) => {
+    if (xterm.modes.mouseTrackingMode !== 'none') e.preventDefault();
+  });
+
   // ---------- touch ----------
 
   const screenEl = () => el.querySelector('.xterm-screen');
@@ -121,34 +234,59 @@ export function createTerminal({ host, setStatus }) {
     },
   });
 
-  function mouseEvent(type, x, y, target = screenEl()) {
+  function mouseEvent(type, x, y, target = screenEl(), button = 0) {
     target?.dispatchEvent(new MouseEvent(type, {
-      clientX: x, clientY: y, button: 0, buttons: type === 'mouseup' ? 0 : 1, bubbles: true, cancelable: true, view: window,
+      clientX: x, clientY: y, button, buttons: type === 'mouseup' ? 0 : (button === 2 ? 2 : 1), bubbles: true, cancelable: true, view: window,
     }));
   }
 
+  // A right press without its release: tmux keeps the menu it opens on the
+  // press until a click picks an item or lands outside it. A release, or a
+  // motion report without a button, would close it again at once.
+  function rightClick(x, y) {
+    mouseEvent('mousedown', x, y, screenEl(), 2);
+  }
+
+  // Touch has no hover. Drop the button-less mousemove a browser sends before
+  // the mousedown of a tap, so programs (and tmux's menu) see only the click.
+  let lastTouch = -Infinity;
+  el.addEventListener('mousemove', (e) => {
+    if (!e.buttons && e.timeStamp - lastTouch < 1000) e.stopPropagation();
+  }, true);
+
   el.addEventListener('touchstart', (e) => {
     scroller.stop();
+    if (e.touches.length === 2 && (!g || (g.mode !== 'scroll' && g.mode !== 'select'))) {
+      clearTimeout(g?.timer);
+      const [a, b] = e.touches;
+      g = { two: true, t0: e.timeStamp, x0: (a.clientX + b.clientX) / 2, y0: (a.clientY + b.clientY) / 2, moved: false };
+      return;
+    }
     if (e.touches.length !== 1) { g = null; return; }
     const p = e.touches[0];
     g = { x0: p.clientX, y0: p.clientY, lastY: p.clientY, mode: null };
-    g.timer = setTimeout(() => {
-      if (g && !g.mode) {
-        g.mode = 'select';
-        mouseEvent('mousedown', g.x0, g.y0);
-      }
-    }, LONG_PRESS_MS);
+    // Held still: a right click on release, or a selection once it moves.
+    g.timer = setTimeout(() => { if (g && !g.mode) g.mode = 'held'; }, LONG_PRESS_MS);
   }, { capture: true, passive: true });
 
   el.addEventListener('touchmove', (e) => {
+    if (g?.two) {
+      const [a, b] = e.touches;
+      if (b && Math.hypot((a.clientX + b.clientX) / 2 - g.x0, (a.clientY + b.clientY) / 2 - g.y0) > MOVE_SLOP) g.moved = true;
+      return;
+    }
     if (!g || e.touches.length !== 1) return;
     const p = e.touches[0];
+    if (g.mode === 'held' && Math.hypot(p.clientX - g.x0, p.clientY - g.y0) > MOVE_SLOP) {
+      g.mode = 'select';
+      mouseEvent('mousedown', g.x0, g.y0);
+    }
     if (!g.mode && Math.hypot(p.clientX - g.x0, p.clientY - g.y0) > MOVE_SLOP) {
       clearTimeout(g.timer);
       g.mode = 'scroll';
       scroller.start(e.timeStamp);
     }
-    if (!g.mode) return;
+    if (!g.mode || g.mode === 'held') return;
     e.preventDefault();
     e.stopPropagation();
     if (g.mode === 'scroll') {
@@ -160,15 +298,27 @@ export function createTerminal({ host, setStatus }) {
   }, { capture: true, passive: false });
 
   const end = (e) => {
+    lastTouch = e.timeStamp;
     if (!g) return;
+    if (g.two) {
+      e.preventDefault();
+      if (e.touches.length) return;
+      if (!g.moved && e.type === 'touchend' && e.timeStamp - g.t0 < TWO_TAP_MS) rightClick(g.x0, g.y0);
+      g = null;
+      return;
+    }
     clearTimeout(g.timer);
-    if (g.mode === 'scroll') {
+    if (g.mode === 'held') {
+      e.preventDefault();
+      if (e.type === 'touchend') rightClick(g.x0, g.y0);
+    } else if (g.mode === 'scroll') {
       e.preventDefault();
       scroller.release(e.timeStamp);
     } else if (g.mode === 'select') {
       e.preventDefault();
       const p = e.changedTouches[0];
       mouseEvent('mouseup', p.clientX, p.clientY, document);
+      if (e.type === 'touchend') copyAfterSelect();
     }
     // Keep the gesture's start point for momentum steps.
     const done = g;
@@ -233,6 +383,16 @@ export function createTerminal({ host, setStatus }) {
     unacked = 0;
   }
 
+  function onControl(buf) {
+    let msg;
+    try { msg = JSON.parse(new TextDecoder().decode(buf)); } catch { return; }
+    if (msg.type === 'open' && typeof msg.url === 'string' && OPENABLE.test(msg.url)) {
+      const href = msg.file ? host.api(msg.url) : msg.url;
+      const text = msg.file ? msg.label : msg.url.replace(/^https?:\/\//, '');
+      toast(text, { action: { label: 'Open', href } });
+    }
+  }
+
   function connect() {
     clearTimeout(retryTimer);
     retryTimer = null;
@@ -258,8 +418,9 @@ export function createTerminal({ host, setStatus }) {
     socket.onmessage = (e) => {
       clearTimeout(pongTimer);
       pongTimer = null;
-      // Text frames are terminal output; binary frames are replies to pings.
+      // Text frames are terminal output; binary frames are JSON messages.
       if (typeof e.data === 'string') onOutput(e.data);
+      else onControl(e.data);
     };
     socket.onclose = () => {
       if (ws !== socket) return;
@@ -299,6 +460,7 @@ export function createTerminal({ host, setStatus }) {
   return {
     ensureConnected() { if (!ws) connect(); },
     reconnect,
+    paste,
     focus() { xterm.focus(); },
     key(name) { input(TERM_SEQ[name] ?? name); },
     fit,

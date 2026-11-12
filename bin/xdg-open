@@ -1,0 +1,33 @@
+#!/bin/sh
+# xdg-open for programs in deskport's terminal (see src/opener.js).
+#
+# When the tmux client used last in this pane's session belongs to a deskport
+# terminal, the link or file opens in that browser. Otherwise, or if no
+# deskport server answers, the system xdg-open runs as usual.
+
+self=$(readlink -f "$0")
+here=${self%/*}
+
+fallback() {
+  # The system xdg-open, without this directory on PATH or as BROWSER.
+  PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$here" | paste -sd: -)
+  export PATH
+  case "${BROWSER:-}" in *"$here"*) unset BROWSER ;; esac
+  exec xdg-open "$@"
+}
+
+[ $# -eq 1 ] && [ -n "${TMUX:-}" ] && command -v curl >/dev/null 2>&1 || fallback "$@"
+case "$1" in -*) fallback "$@" ;; esac
+
+target=$1
+[ -e "$target" ] && target=$(readlink -f -- "$target")
+client=$(tmux list-clients -t "${TMUX_PANE:-}" -F '#{client_activity} #{client_pid}' 2>/dev/null | sort -rn | head -n 1 | cut -d' ' -f2)
+[ -n "$client" ] || fallback "$@"
+
+for sock in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/deskport/open-*.sock; do
+  [ -S "$sock" ] || continue
+  curl -fs --max-time 3 --unix-socket "$sock" \
+    --data-urlencode "target=$target" --data-urlencode "client=$client" \
+    http://localhost/open >/dev/null 2>&1 && exit 0
+done
+fallback "$@"

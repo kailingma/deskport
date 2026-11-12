@@ -13,6 +13,7 @@ import { createHostRegistry, routeFor } from './hosts.js';
 import { createApi } from './api.js';
 import { createMonitors } from './monitors.js';
 import { createUi } from './ui.js';
+import { createOpener } from './opener.js';
 
 // Starts one deskport host: authentication and security headers, the API, the
 // web page (unless DESKPORT_UI=0), and the screen and terminal WebSockets.
@@ -46,6 +47,12 @@ const monitors = createMonitors({
   log,
 });
 monitors.restoreLeftover();
+const opener = createOpener({
+  dir: path.join(process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`, 'deskport'),
+  port: config.port,
+  log,
+});
+const terminal = { ...config.terminal, binDir: path.join(root, 'bin'), opener };
 
 // ---------- HTTP ----------
 
@@ -74,7 +81,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const api = createApi({ hosts, session, monitors });
+const api = createApi({ hosts, session, monitors, opener });
 app.use(api);
 app.use('/h/:hostId', (req, res, next) => {
   const host = hosts.get(req.params.hostId);
@@ -107,7 +114,7 @@ const termWss = new WebSocketServer({
 });
 const endpoints = {
   '/ws/screen': { wss: screenWss, open: (ws, req) => handleScreen(ws, req, { ...config, session, monitors }, log) },
-  '/ws/term': { wss: termWss, open: (ws, req) => handleTerminal(ws, req, config.terminal, log) },
+  '/ws/term': { wss: termWss, open: (ws, req) => handleTerminal(ws, req, terminal, log) },
 };
 
 function reject(socket, status, text) {
@@ -149,6 +156,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     log(`${sig}, shutting down`);
     server.close();
+    opener.close();
     for (const c of [...screenWss.clients, ...termWss.clients]) c.terminate();
     setTimeout(() => process.exit(0), 500).unref();
   });

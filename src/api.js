@@ -11,8 +11,9 @@ import { sameOrigin } from './auth.js';
  *   GET  /api/session        state of the separate desktop
  *   POST /api/session/stop   end the separate desktop (same-origin only)
  *   GET  /api/monitors       the physical monitors My monitor can show
+ *   GET  /api/files/:token/:name  a file opened with xdg-open in the terminal
  */
-export function createApi({ hosts, session, monitors }) {
+export function createApi({ hosts, session, monitors, opener }) {
   const api = express.Router();
   const noStore = (res) => res.set('Cache-Control', 'no-store');
 
@@ -49,6 +50,8 @@ export function createApi({ hosts, session, monitors }) {
       res.status(500).json({ error: err.message.trim().split('\n').at(-1) });
     }
   });
+
+  if (opener) api.get('/api/files/:token/:name', (req, res) => opener.serveFile(req, res));
 
   return api;
 }

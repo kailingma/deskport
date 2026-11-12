@@ -23,10 +23,11 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | `src/session.js` | Starts, checks and stops the separate desktop's systemd unit, and sets its monitor scale. |
 | `src/monitors.js` | Lists the physical monitors, and for My monitor changes the monitor's mode to fit the viewer and the primary monitor while connected, then puts the configuration back. |
 | `src/pacing.js` | Acknowledges frames to guacd ahead of the browser at Responsiveness. |
-| `src/terminal.js` | Attaches a WebSocket to tmux through a pseudo-terminal, with output batching and flow control. |
+| `src/terminal.js` | Attaches a WebSocket to tmux through a pseudo-terminal, with output batching and flow control, and sets PATH and BROWSER for the session. |
 | `public/app.js` | Entry point: views, full screen and the floating toolbar, settings dialog, key row, viewport handling. |
 | `public/js/screen.js` | Screen view: Guacamole client, scaling and zoom, touch gestures, soft keyboard. |
-| `public/js/terminal.js` | Terminal view: xterm.js, reconnects, touch scrolling and selection, appearance settings. |
+| `src/opener.js`, `bin/xdg-open` | Opens links and files from the terminal in the browser using it. |
+| `public/js/terminal.js` | Terminal view: xterm.js, reconnects, touch scrolling, selection and tmux's menu, copy and paste, appearance settings. |
 | `public/js/host.js` | The host a view talks to: builds every API and WebSocket URL, with an `/h/<id>` prefix for other hosts later. |
 | `public/js/dialog.js` | The confirmation dialog. |
 | `public/js/settings.js`, `themes.js`, `keys.js`, `gestures.js` | Per-device settings store, terminal colour schemes and fonts, key codes and sticky modifiers, scroll momentum. |
@@ -130,6 +131,13 @@ With `?flow=1`, the page also sends `{"type":"ping","id":N}` every 15 s while vi
 Closing the socket kills the tmux client only; the session and its programs keep running. The browser reconnects at once, then with backoff (0.5 s up to 10 s), and skips the rest of a wait when the page becomes visible or the network returns.
 
 xterm draws with its WebGL renderer, and falls back to the DOM renderer if WebGL is missing or its context is lost (iOS drops it in the background); WebGL is tried again when the page is shown.
+
+### Copy, paste and xdg-open
+
+- **Copy.** Programs copy with OSC 52, and tmux (`set-clipboard on`) sends one whenever it copies a selection. The page handles OSC 52 and writes the text to the browser's clipboard. A touch selection ends inside the gesture, but tmux's copy comes back a round trip later, so the page starts a clipboard write at once with a promise of the text (`ClipboardItem`), which keeps the gesture's permission. When the browser refuses a write outside a gesture (iPhone Safari does), a toast offers a Copy button. Ctrl+Shift+C copies xterm's own selection (Shift+drag while a program has the mouse).
+- **Paste.** The Paste button (top bar, key row, More) reads the browser's clipboard and pastes it as one bracketed paste. Ctrl+Shift+V is left to the browser, which pastes.
+- **tmux's menu.** Right click goes to tmux, not the browser's menu, while a program has the mouse. On touch, a long press released without moving, or a two-finger tap, sends a right press without its release: tmux closes the menu it opens on the press if a release follows, and keeps it until a tap picks an item or lands outside. The button-less mousemove a browser sends before a tap's mousedown is dropped for the same reason.
+- **xdg-open.** The bridge starts the tmux client with `bin/` first on PATH and `BROWSER=bin/xdg-open`, and sets both in the session's environment (`tmuxArgs()`), so new windows and panes get them; shells that were already running keep their own. `bin/xdg-open` asks tmux which client was used last in its session and posts the target to each deskport server's socket, `$XDG_RUNTIME_DIR/deskport/open-<port>.sock` (mode 600, `src/opener.js`). The server whose bridge owns that client sends `{"type":"open"}` to its page, which shows the link in a toast with an Open button, since browsers only open tabs from a tap. Files are served at `/api/files/<random token>/<name>` for 15 minutes; HTML, SVG and XML files get a `sandbox` CSP so they cannot run scripts on deskport's origin. Only http, https, mailto, tel and sms links are passed on. In every other case (no deskport client was used last, no server answers, a directory) the script runs the system `xdg-open`.
 
 ## Processes on the host
 

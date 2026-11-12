@@ -31,8 +31,8 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
 ### iPhone
 
 - **No top bar**: the views use the whole screen. A bottom tab bar switches between Screen and Terminal; a dot on a tab means that view is connecting or disconnected.
-- **More** opens a sheet with what to Show (My monitor, Extra monitor, Separate desktop), Show keyboard, Send clipboard, Press Super, Send Ctrl+Alt+Delete, Reconnect, Settings and Full screen.
-- **Key row**: Esc, Tab, Ctrl, Alt, the arrow keys, and `/ - | ~`. It appears above the on-screen keyboard, and always in the Terminal view. Ctrl and Alt stay on for the next key you press, so Ctrl then `c` sends Ctrl+C.
+- **More** opens a sheet with what to Show (My monitor, Extra monitor, Separate desktop), Show keyboard, Paste (Terminal), Send clipboard (Screen), Press Super, Send Ctrl+Alt+Delete, Reconnect, Settings and Full screen.
+- **Key row**: Esc, Tab, Ctrl, Alt, the arrow keys, `/ - | ~`, and Paste in the Terminal view. It appears above the on-screen keyboard, and always in the Terminal view. Ctrl and Alt stay on for the next key you press, so Ctrl then `c` sends Ctrl+C.
 - **Touch on the Screen view**:
 
   | Gesture | Does |
@@ -45,7 +45,8 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
   | Long press, then release | Right click |
   | Two-finger tap | Right click |
 
-- **Touch in the Terminal view**: drag to scroll (tmux scrollback when tmux has the mouse, which it does with `set -g mouse on`), long press then drag to select. tmux copies the selection to its buffer when you lift your finger.
+- **Touch in the Terminal view**: drag to scroll (tmux scrollback when tmux has the mouse, which it does with `set -g mouse on`), long press then drag to select. tmux copies the selection when you lift your finger, and it lands on the phone's clipboard. Long press and release, or a two-finger tap, opens tmux's menu; tap an item to pick it. Paste is on the key row and under More.
+- **Links from the terminal**: `xdg-open` (and anything that uses `BROWSER`) in a new tmux window or pane shows the link or file in a toast with an Open button on the device you typed on. Windows opened before deskport was updated keep the old behaviour.
 - **Full screen**: iPhone Safari has no full-screen mode for web pages. More, then Full screen, explains the alternative: Share, then Add to Home Screen. Opened from that icon, deskport fills the screen, including the area behind the status bar. The Home Screen app keeps its own cookies, so it asks you to sign in once. Android browsers use real full screen.
 
 ### Settings

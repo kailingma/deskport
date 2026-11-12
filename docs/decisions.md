@@ -4,6 +4,14 @@ Choices made while building deskport, newest first, with the reason for each. En
 
 ## 2026-11-12
 
+### Copy, paste, tmux's menu and xdg-open in the terminal
+The owner asked for xdg-open, copying and pasting, and tmux's right-click menu to work in the Terminal view.
+
+- **Copy through OSC 52**, the way terminals receive tmux's copies; tmux here already has `set-clipboard on`. iPhone Safari only writes the clipboard during a tap, and tmux's copy arrives a round trip after the finger lifts, so the page starts the write at the end of the selection with a promise of the text. When that is not possible, a toast offers a Copy button rather than dropping the text. Tested in headless Chromium: a touch selection reached the clipboard and an OSC 52 from `printf` did too. Not yet tried on an iPhone.
+- **Paste is a button**, because a page can only read the clipboard from a tap or click, and long press in the terminal already selects. It pastes as one bracketed paste.
+- **tmux's menu on touch.** Long press and release, and two-finger tap, are a right click, matching the Screen view. tmux closes the menu again when the right button's release reaches it (a quick click whose press and release arrive together never shows the menu), so the touch right click sends only the press and the menu waits for a tap. The browser's button-less mousemove before each tap is dropped, since tmux read it as a release. Tested in headless Chromium: both gestures opened the menu and a tap on Horizontal Split split the pane. On a desktop browser a real right click behaves as in any terminal: tmux keeps the menu if the mode change reaches xterm before the button comes up.
+- **xdg-open opens on the device that typed the command** (*autonomous*: the alternative was the desk's monitor, which the person on the phone cannot see). It goes there only when a deskport terminal was the tmux client used last; otherwise the system xdg-open runs as before. The script reaches the server over a Unix socket that only this user can open, so no Access token is needed. Opened files are served under a random token for 15 minutes, and HTML, SVG and XML are sandboxed so a downloaded page cannot run scripts with deskport's access. The shell already gives full access to the same files, so serving one the user asked to open adds nothing new. Existing shells in `web` do not have the new PATH or BROWSER; new windows and panes do.
+
 ### Speed on slow links and through the tunnel
 The owner asked for the fastest experience on slow connections and through Cloudflare, the terminal included, with as few compromises as possible. Measured with `scripts/measure-terminal.mjs` (a proxy that delays each direction by half the round trip, limits the download rate and buffers without limit, as Cloudflare's edge does) and `scripts/measure-clear.mjs`.
 
