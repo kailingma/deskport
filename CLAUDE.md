@@ -39,6 +39,6 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 
 - Not yet confirmed on an iPhone: menus scrolling over the Screen view, the separate desktop at scale 2, the phone layout without a top bar, and the Add to Home Screen path.
 - Multi-host: the steps under "What is left" in docs/multi-host.md.
-- Separate desktop: snaps opening there (the `wayland-90` socket and abstract bus address in `desktop-session.sh`) need a restart of it to test. Chromium browsers open on the main desktop while open there.
+- Separate desktop: Chromium browsers open on the main desktop while one is open there (one profile per process). A snap opened there holds its profile, so the same snap cannot start on the main desktop until it is closed.
 - Match this device (My monitor) has never been run against the physical monitor. Never turn it on in a test; only the owner does.
 - Windows XP clients: research only, docs/legacy-clients.md.
