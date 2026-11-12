@@ -145,6 +145,54 @@ async function setShareMode(mode, log) {
   }
 }
 
+/** True if `uid` is signed in to a desktop on a seat (not only ssh or a lingering user manager). */
+export function hasDesktopLogin(sessions, uid) {
+  return sessions.some((s) => s.uid === uid && s.class === 'user' && s.seat);
+}
+
+function portOpen(host, port, ms = 1500) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port });
+    const done = (open) => { socket.destroy(); resolve(open); };
+    socket.setTimeout(ms, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
+}
+
+const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
+export const NO_DESKTOP_LOGIN = 'Nobody is signed in on this computer\'s screen, so there is nothing to show. '
+  + 'This happens after a restart. Sign in at the computer, or choose Separate desktop.';
+
+/**
+ * Resolves once GNOME desktop sharing accepts connections on host:port. On this
+ * machine it starts gnome-remote-desktop if a desktop login exists, and rejects
+ * with NO_DESKTOP_LOGIN if none does (GNOME shares only a signed-in desktop).
+ */
+async function desktopSharingReady(host, port, log) {
+  if (await portOpen(host, port)) return;
+  if (!LOOPBACK.has(host)) throw new Error(`GNOME desktop sharing is not answering at ${host}:${port}.`);
+  let sessions = null;
+  try {
+    sessions = JSON.parse((await run('loginctl', ['list-sessions', '-j'])).stdout);
+  } catch (err) {
+    log(`screen: could not list login sessions: ${err.message}`);
+  }
+  if (sessions && !hasDesktopLogin(sessions, process.getuid())) {
+    log(`screen: port ${port} closed and no desktop login`);
+    throw new Error(NO_DESKTOP_LOGIN);
+  }
+  log(`screen: port ${port} closed, starting gnome-remote-desktop`);
+  await run('systemctl', ['--user', 'start', 'gnome-remote-desktop.service']).catch((err) => {
+    log(`screen: could not start gnome-remote-desktop: ${err.message}`);
+  });
+  for (let i = 0; i < 10; i++) {
+    if (await portOpen(host, port)) return;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error(`GNOME desktop sharing is not answering on port ${port}. Check that desktop sharing is on in Settings, System, Remote Desktop on the computer.`);
+}
+
 const BASE_PARAMS = {
   'color-depth': '24',
   'enable-font-smoothing': 'true',
@@ -205,18 +253,21 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors }, log) {
   ws.on('close', () => releaseMonitors?.());
   const ready = source === 'session'
     ? session.ensureRunning()
-    : setShareMode(source === 'virtual' ? 'extend' : 'mirror-primary', log).then(async () => {
-      if (!match && monitor === 'primary') return;
-      const release = await monitors.acquire(match ? { width, height, monitor } : { monitor });
-      if (ws.readyState === ws.OPEN) releaseMonitors = release;
-      else release();
-    });
+    : desktopSharingReady(rdp.hostname, port, log)
+      .then(() => setShareMode(source === 'virtual' ? 'extend' : 'mirror-primary', log))
+      .then(async () => {
+        if (!match && monitor === 'primary') return;
+        const release = await monitors.acquire(match ? { width, height, monitor } : { monitor });
+        if (ws.readyState === ws.OPEN) releaseMonitors = release;
+        else release();
+      });
   ready.then(() => {
     if (ws.readyState === ws.OPEN) connect();
   }, (err) => {
     log(`screen: ${err.message}`);
     if (ws.readyState === ws.OPEN) {
-      ws.send(encode(['error', `Could not start the separate desktop: ${err.message}`, String(STATUS_UPSTREAM_NOT_FOUND)]));
+      const message = source === 'session' ? `Could not start the separate desktop: ${err.message}` : err.message;
+      ws.send(encode(['error', message, String(STATUS_UPSTREAM_NOT_FOUND)]));
       ws.close(1011, String(STATUS_UPSTREAM_NOT_FOUND));
     }
   });

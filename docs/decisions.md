@@ -85,3 +85,6 @@ GNOME ignores colour depth and most RDP experience flags, so a 16-bit "fast" pre
 
 ### Look: the category standard, modelled on the Cloudflare dashboard
 The owner rejected decorative directions and asked for simple and corporate, next to Cloudflare (then Vercel, Tailscale). See DESIGN.md.
+
+### My monitor after a restart
+After the computer restarts, GDM shows the login screen and nobody is signed in, so GNOME has no desktop to share and nothing listens on the desktop sharing port. guacd then reported only a generic upstream error. Before connecting My monitor or an Extra monitor, the bridge now checks the port. If it is closed and `loginctl` shows no signed-in seat session for this user, the browser is told that someone has to sign in at the computer or use the separate desktop, which needs no login. If a desktop login exists, the bridge starts `gnome-remote-desktop.service` and waits up to 3 seconds for it. GDM automatic login would avoid the wait for a physical sign-in, but it needs root and was left to the owner.
