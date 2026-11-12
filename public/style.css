@@ -315,14 +315,19 @@ main { flex: 1; position: relative; min-height: 0; }
 
 .term-wrap {
   position: absolute; inset: 0;
+  padding: 12px 0 8px calc(14px + var(--safe-l));
   background: var(--term-bg, #0f1012);
 }
-/* The padding sits on .xterm, not .term-wrap: the fit addon sizes the terminal
-   from its parent's height including padding and subtracts only .xterm's own
-   padding, so padding on the parent made it a row and a column too big. */
-.term-wrap .xterm { height: 100%; padding: 12px 0 8px calc(14px + var(--safe-l)); }
-.term-wrap .xterm-viewport { scrollbar-width: thin; scrollbar-color: #3a3c40 transparent; }
-body.is-fullscreen .term-wrap .xterm { padding-top: 16px; }
+/* xterm opens inside .term-box, not .term-wrap: the fit addon measures the
+   terminal's parent, and .term-wrap's height would include its padding,
+   making the terminal a row and a column bigger than the space. */
+.term-box { position: relative; width: 100%; height: 100%; }
+.term-wrap .xterm { height: 100%; }
+/* xterm paints its viewport black by default, which shows below the last row;
+   xterm 6 draws its own scrollbar, so the native one is hidden. */
+.term-wrap .xterm-viewport { background-color: var(--term-bg, #0f1012) !important; scrollbar-width: none; }
+.term-wrap .xterm-viewport::-webkit-scrollbar { display: none; }
+body.is-fullscreen .term-wrap { padding-top: 16px; }
 
 .ime {
   position: fixed;

@@ -20,6 +20,10 @@ const MOVE_SLOP = 10;
 export function createTerminal({ host, setStatus }) {
   const el = document.getElementById('term');
   const view = document.getElementById('view-term');
+  // xterm goes in an unpadded box so the fit addon measures the real space.
+  const box = document.createElement('div');
+  box.className = 'term-box';
+  el.append(box);
   const xterm = new Terminal({
     cursorBlink: settings.get('cursorBlink'),
     cursorStyle: settings.get('cursorStyle'),
@@ -168,7 +172,7 @@ export function createTerminal({ host, setStatus }) {
   function connect() {
     clearTimeout(retryTimer);
     if (!opened) {
-      xterm.open(el);
+      xterm.open(box);
       opened = true;
       xterm.onData(input);
       new ResizeObserver(() => fit()).observe(el);
