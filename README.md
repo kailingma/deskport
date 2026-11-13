@@ -101,7 +101,7 @@ Measured on this 4K desktop while it was busy (read-only sessions, 10 seconds ea
 | 50%, Low | 1920 × 1080 | 220 KB/s |
 | 50%, Low, Data use | 1920 × 1080 | 180 KB/s |
 
-Re-encoding did not lower the frame rate in these runs. `node scripts/measure-screen.mjs [seconds] [ws://host:port] [query ...]` repeats the measurement against a dev server.
+Re-encoding did not lower the frame rate in these runs. `node bench/measure-screen.mjs [seconds] [ws://host:port] [query ...]` repeats the measurement against a dev server.
 
 Time from a key press to the first screen update reaching the browser, measured on the separate desktop on this machine (no network in between; 24 keys each):
 
@@ -111,7 +111,7 @@ Time from a key press to the first screen update reaching the browser, measured 
 | Low, Responsiveness | 45 ms | 50 ms |
 | High, Data use | 39 ms | 47 ms |
 
-Before the fix described under Prioritize, Data use had a 90th percentile of 1.5 s and 5 of 24 keys showed no update within 3 s. `node scripts/measure-typing.mjs [ws://host:port] [query ...]` repeats this; it types only into the separate desktop.
+Before the fix described under Prioritize, Data use had a 90th percentile of 1.5 s and 5 of 24 keys showed no update within 3 s. `node bench/measure-typing.mjs [ws://host:port] [query ...]` repeats this; it types only into the separate desktop.
 
 ### Video
 
@@ -160,8 +160,8 @@ npm run dev      # watch mode, Access checks off, loopback only
 npm test         # protocol parser tests
 npm run check    # syntax check of every source file
 node scripts/make-icons.mjs   # regenerate public/icons/*.png from the icon geometry
-node scripts/measure-screen.mjs 15 ws://127.0.0.1:7900   # bandwidth per quality preset
-node scripts/measure-typing.mjs ws://127.0.0.1:7900      # key-to-screen latency, on the separate desktop
+node bench/measure-screen.mjs 15 ws://127.0.0.1:7900   # bandwidth per quality preset
+node bench/measure-typing.mjs ws://127.0.0.1:7900      # key-to-screen latency, on the separate desktop
 ```
 
 There is no build step. The page is plain ES modules; browser libraries (guacamole-common-js, xterm.js, Inter) are served from `node_modules` under `/vendor/`.

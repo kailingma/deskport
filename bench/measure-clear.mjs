@@ -3,7 +3,7 @@
 // desktop on the monitor), maximizes it, fills it with text and runs `clear`,
 // then times from Enter until the first drawing instruction and the last large
 // message (over 4 KB) of the redraw, and counts the bytes sent. Closes the terminal at the end.
-// Usage: node scripts/measure-clear.mjs [ws://host:port] [query ...]
+// Usage: node bench/measure-clear.mjs [ws://host:port] [query ...]
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import WebSocket from 'ws';

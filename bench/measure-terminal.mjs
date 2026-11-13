@@ -10,7 +10,7 @@
 // (seq, or the FLOOD command) and times how long Ctrl+C takes to bring the
 // prompt back, and how many
 // bytes crossed the link meanwhile.
-// Usage: [LINK_KBPS=4000] [RTT_MS=150] [FLOOD="command"] node scripts/measure-terminal.mjs [ws://127.0.0.1:7902] [query]
+// Usage: [LINK_KBPS=4000] [RTT_MS=150] [FLOOD="command"] node bench/measure-terminal.mjs [ws://127.0.0.1:7902] [query]
 import net from 'node:net';
 import WebSocket from 'ws';
 

@@ -35,7 +35,8 @@ One Node process (`src/server.js`) serves the page, the vendored browser librari
 | `public/js/dialog.js` | The confirmation dialog. |
 | `public/js/settings.js`, `themes.js`, `keys.js`, `gestures.js` | Per-device settings store, terminal colour schemes and fonts, key codes and sticky modifiers, scroll momentum. |
 | `public/` (rest) | `index.html`, `style.css`, `theme-init.js` (applies a saved light/dark choice before first paint), icons, manifest. No build step. |
-| `scripts/` | `setup-rdp.sh`, `install-services.sh`, `desktop-session.sh` (the separate desktop), `session-scale.py` (sets its monitor scale), `session-systemd-proxy.py` (systemd on its private bus), `monitor-config.py` (reads and applies Mutter's monitor configuration), `make-icons.mjs`, `measure-screen.mjs`, `measure-typing.mjs` (`LINK_KBPS` simulates a slow link), `measure-clear.mjs`, `measure-terminal.mjs` (Terminal echo and Ctrl+C during a flood, over a simulated slow link). |
+| `scripts/` | `setup-rdp.sh`, `install-services.sh`, `desktop-session.sh` (the separate desktop), `session-scale.py` (sets its monitor scale), `session-systemd-proxy.py` (systemd on its private bus), `monitor-config.py` (reads and applies Mutter's monitor configuration), `make-icons.mjs`. |
+| `bench/` | Measurement: `measure-screen.mjs`, `measure-typing.mjs` (`LINK_KBPS` simulates a slow link), `measure-clear.mjs`, `measure-terminal.mjs` (Terminal echo and Ctrl+C during a flood, over a simulated slow link). |
 | `deploy/` | guacd compose file and the cloudflared config example. |
 | `test/` | `node --test` tests for the protocol parser, the scaler, the separate desktop's size and scale, the host registry and the page's asset serving. |
 

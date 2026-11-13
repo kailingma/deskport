@@ -3,7 +3,7 @@
 // reaches the desktop on the monitor. Opens the Activities search, types
 // letters and backspaces, and times each key press until guacd's next drawing
 // instruction reaches this client.
-// Usage: [ACK_DELAY=ms] [LINK_KBPS=n] node scripts/measure-typing.mjs [ws://host:port] [query ...]
+// Usage: [ACK_DELAY=ms] [LINK_KBPS=n] node bench/measure-typing.mjs [ws://host:port] [query ...]
 import WebSocket from 'ws';
 
 const [base = 'ws://127.0.0.1:7900', ...queries] = process.argv.slice(2);

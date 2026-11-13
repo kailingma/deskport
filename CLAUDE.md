@@ -13,7 +13,7 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 
 ## Testing without disturbing the owner
 
-- **Never send input to My monitor** (`source=mirror`): it is the owner's live desktop. Read-only connections are fine. For anything that types or clicks, use the separate desktop (`source=session`); `scripts/measure-typing.mjs` does this.
+- **Never send input to My monitor** (`source=mirror`): it is the owner's live desktop. Read-only connections are fine. For anything that types or clicks, use the separate desktop (`source=session`); `bench/measure-typing.mjs` does this.
 - **Never change the main desktop's monitor configuration** (Mutter `DisplayConfig`, `monitors.xml`, display scale). It once left the display unable to draw until a re-login. Changing it on the separate desktop's private bus (`scripts/session-scale.py`, `scripts/monitor-config.py`) is safe. The Match this device setting changes it on purpose; do not turn it on in tests.
 - **Terminal tests** resize the owner's tmux session `web`. Run a second server on another port with `DESKPORT_TMUX_SESSION=<throwaway>` and kill that tmux session afterwards.
 - **Browser pane**: the page reconnects the last view on load, including the screen. On a fresh origin, first open `/api/host`, set `localStorage['deskport.view'] = 'term'`, then load `/`.
@@ -28,7 +28,7 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 - Unix socket paths are limited to 108 bytes. A long `XDG_RUNTIME_DIR` fails with "Argument list too long".
 - guacd turns the browser's size into a smaller desktop size using its `dpi` argument unless `dpi` is passed explicitly (a 2031 px wide window became 1352). `sessionLayout()` in `src/guac.js` passes it.
 - GNOME ignores the client's DPI. Its virtual monitors offer only whole-number scales, and only when the scaled desktop keeps at least 800 × 480 logical pixels.
-- GNOME mirror mode ignores the requested size, colour depth and most RDP experience flags. Measure with `scripts/measure-screen.mjs` before claiming a speed change.
+- GNOME mirror mode ignores the requested size, colour depth and most RDP experience flags. Measure with `bench/measure-screen.mjs` before claiming a speed change.
 - When pacing frames, coalesce held `sync` acknowledgements; never queue them. Queueing built up seconds of typing lag.
 - Guacamole element lengths count code points, and `WebSocketTunnel` needs whole instructions per WebSocket frame.
 - xterm's fit addon measures the terminal's parent including padding. Keep xterm inside the unpadded `.term-box`. Its viewport defaults to a black background, and xterm 6 draws its own scrollbar.

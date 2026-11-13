@@ -1,6 +1,6 @@
 // Measures screen bandwidth and frame rate for picture settings against a running
 // dev server (npm run dev). Opens one read-only session per case and sends no input.
-// Usage: node scripts/measure-screen.mjs [seconds] [ws://host:port] [query ...]
+// Usage: node bench/measure-screen.mjs [seconds] [ws://host:port] [query ...]
 //   each query is extra URL parameters, e.g. "res=0.5&quality=low"
 import WebSocket from 'ws';
 
