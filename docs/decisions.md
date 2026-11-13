@@ -4,6 +4,31 @@ Choices made while building deskport, newest first, with the reason for each. En
 
 ## 2026-11-12
 
+### Bench and baseline (roadmap phase 0)
+`bench/run.mjs` is the yardstick for every speed change from here on (method in [bench/README.md](../bench/README.md)). It starts its own server from the checkout, measures on the separate desktop only, and saves results in `bench/results/`. Baseline: `bench/results/2026-11-12-baseline.json`, commit cbd1f49, three runs, medians below. 1280 × 720, quality High, Responsiveness, Adapt bitrate. Bytes are after WebSocket compression.
+
+| Link | Case | Key to pixel (p90) | Overview press to pixel | Catch-up | Overview KB/min | Typing KB/min | Capture to encode |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| loopback | images | 52 (64) ms | 47 ms | 0 | 34,114 | 5,356 | not reported |
+| loopback | AV1 | 43 (57) ms | 37 ms | 0 | 6,673 | 1,062 | 8 ms |
+| loopback | H.264 | 37 (41) ms | 26 ms | 0 | 1,255 | 1,683 | 1 ms |
+| 4 Mbit/s, 150 ms | images | 202 (206) ms | 220 ms | 2.2 s | 35,278 | 4,245 | |
+| 4 Mbit/s, 150 ms | AV1 | 198 (206) ms | 249 ms | 0 | 5,014 | 823 | 7 ms |
+| 4 Mbit/s, 150 ms | H.264 | 190 (215) ms | 197 ms | 0 | 2,486 | 1,714 | 1 ms |
+| 1 Mbit/s, 400 ms | images | 458 (467) ms | 1,105 ms | 42.4 s, then guacd disconnects | 36,618 | 3,172 | |
+| 1 Mbit/s, 400 ms | AV1 | 467 (509) ms | 456 ms | 1.3 s | 520 | 549 | 7 ms |
+| 1 Mbit/s, 400 ms | H.264 | 459 (935) ms | 439 ms | 0.1 s | 588 | 1,141 | 1 ms |
+
+Terminal: echo 3, 151 and 402 ms; Ctrl+C during a `seq` flood 58, 277 and 530 ms; 923, 38 and 35 KB crossing the link meanwhile.
+
+What it shows:
+- On a slow link a keystroke costs about one round trip plus 40 to 60 ms on every path, so the remaining local delay to remove is those 40 to 60 ms: guacd and RDP for images, and for video the input path through guacd and RDP plus the capture.
+- Images do not adapt to the link. They push about 35 MB a minute during large changes whatever the link; at 1 Mbit/s the picture fell 42 s behind and guacd then closed every connection ("User is not responding", its acknowledgements arrived after its 15 s timeout). The video paths kept up, with 1.3 s of catch-up at worst.
+- H.264 on the graphics card is the fastest to encode (1 ms) and the quickest on loopback. AV1 used less data on typing.
+- The page's decoding and drawing are not included (the bench acknowledges frames on arrival). GNOME on the separate desktop draws only one or two frames per overview press, so "overview" is large changes, not continuous animation.
+
+Bench choices (*autonomous*): the three phases (idle, typing in the Activities search, opening and closing the overview every 350 ms) and their sizes; both directions of the simulated link limited, with one limit shared by a case's sockets; three runs per baseline, medians reported. A first version of the bench took updates already queued on the link for a key's answer (key to pixel came out under the round trip) and ended catch-up at the first quiet gap while bytes were still in flight; both fixed before the baseline. It also suggested H.264 took 110 ms on loopback, which the fixed bench did not reproduce (37 ms).
+
 ### Hub and agents, dialled out from each machine
 The owner asked for the fastest possible screen, several machines with one install each, a coordination server, and a picker and metrics dashboard per machine. Hosts will keep an outbound connection to a hub (the owner's choice over the controller dialling each host's own tunnel, and over Tailscale only), so a new machine needs no tunnel or Access application. Linux first, Windows later, macOS not planned. The agent will be Rust (single binary, Windows later, no garbage collector in the frame path) and the hub stays Node. Speed is expected from removing guacd, RDP and the extra encodes (GNOME's RemoteDesktop and ScreenCast APIs, already present on the separate desktop), not from the language. The plan and phases are in [roadmap.md](roadmap.md).
 

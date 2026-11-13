@@ -1,6 +1,6 @@
 # Roadmap: fast path, hub and agents
 
-Status: planned (2026-11-12). This page is the map for the next stage of deskport. Each phase ends with something that works and is measured; nothing is removed until its replacement matches it. Update the status column as phases land, and log choices in [decisions.md](decisions.md).
+Status: phase 0 done, phase 1 next (2026-11-12). This page is the map for the next stage of deskport. Each phase ends with something that works and is measured; nothing is removed until its replacement matches it. Update the status column as phases land, and log choices in [decisions.md](decisions.md).
 
 ## Goals
 
@@ -19,7 +19,7 @@ Measured so far (see decisions.md, 2026-11-11 and 2026-11-12):
 | --- | --- | --- |
 | Images path | GNOME RDP encode → guacd decodes and re-encodes as PNG/JPEG → base64 text → bridge re-encodes as WebP → browser decodes | Up to four encodes per frame. 7.2 MB of base64 for a 10 s test that took 660 KB as AV1. |
 | Video path | Mutter ScreenCast → GStreamer → `nvh264enc` (1.3 ms at 1280 × 720) or `av1enc` (8 ms) → WebCodecs | Already skips guacd for the picture. Input, pointer and clipboard still go browser → guacd → RDP → GNOME. |
-| Keystroke to pixel | 20 ms median on the separate desktop on loopback (images, Responsiveness) | Network adds the round trip. |
+| Keystroke to pixel | Bench baseline (decisions.md, "Bench and baseline"): 52 ms images, 43 ms AV1, 37 ms H.264 on loopback; one round trip plus 40 to 60 ms on slow links | Images fall 42 s behind on 1 Mbit/s during large changes, and guacd then disconnects. |
 | Node's own work | Parsing and forwarding Guacamole text, WebP via sharp (libvips) | Not profiled. Rewriting this layer in another language alone is not expected to matter; removing stages is. |
 
 ## Target shape
@@ -100,7 +100,7 @@ Moves happen in their own commits with no behaviour change, so history stays rea
 
 | # | Phase | Done when | Status |
 | --- | --- | --- | --- |
-| 0 | **Bench.** One harness that records keystroke-to-pixel, capture-to-encode, frame delivery and bytes per minute on the separate desktop, at simulated links (loopback, 4 Mbit/s and 150 ms, 1 Mbit/s and 400 ms), and saves results under `bench/results/`. | Baseline for images, AV1 and H.264 saved. | planned |
+| 0 | **Bench.** One harness that records keystroke-to-pixel, capture-to-encode, frame delivery and bytes per minute on the separate desktop, at simulated links (loopback, 4 Mbit/s and 150 ms, 1 Mbit/s and 400 ms), and saves results under `bench/results/`. | Baseline for images, AV1 and H.264 saved. | done (2026-11-12, `bench/results/2026-11-12-baseline.json`) |
 | 1 | **Protocol and split.** Write `docs/protocol.md`. Move code into `hub/` and `web/`. The current host code talks to the hub over the protocol on loopback (a Node "agent shim"), so nothing visible changes. | Tests pass, bench unchanged within noise. | planned |
 | 2 | **Rust agent: metrics and terminal; join flow.** Agent binary with control socket, metrics and the tmux terminal; join tokens in the hub UI; install script that puts the binary and a systemd user unit in place. A second Linux machine joins. | A machine without a desktop shows in the hub with its terminal and metrics. | planned |
 | 3 | **Picker and dashboard.** Host list or grid, sorting, search, own order, status; dashboard per machine; per-host settings (`deskport.settings.<id>`) and the remembered host. | Usable on phone and desktop; checked in emulation, iPhone by the owner. | planned |
