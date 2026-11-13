@@ -103,6 +103,12 @@ export function createOpener({ dir, port, log }) {
       clients.set(pid, send);
       return () => { if (clients.get(pid) === send) clients.delete(pid); };
     },
+    /** The file shared under token, or null once it has expired; sandbox for types a browser could run scripts in. */
+    fileFor(token) {
+      const f = files.get(token);
+      if (!f || f.expires < Date.now()) return null;
+      return { file: f.file, sandbox: SCRIPTABLE.test(f.file) };
+    },
     /** Express handler for GET /api/files/:token/:name. */
     serveFile(req, res) {
       const f = files.get(req.params.token);

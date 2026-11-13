@@ -107,6 +107,8 @@ const out = {
   date: new Date().toISOString(),
   ...gitInfo(),
   query: args.query || '',
+  // Server settings that change the measured path.
+  settings: { relay: process.env.DESKPORT_RELAY === '1' },
   links: Object.fromEntries(links.map((l) => [l, LINKS[l]])),
   results,
 };

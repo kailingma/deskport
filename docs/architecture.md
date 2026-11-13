@@ -6,7 +6,15 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
                                                                    └─ /ws/term   ─▶ node-pty ─▶ tmux "web"
 ```
 
-One Node process (`hub/server.js`) serves the page, the vendored browser libraries, and two WebSocket endpoints. Nothing listens on a public interface: cloudflared makes an outbound connection to Cloudflare and forwards requests for the hostname to 127.0.0.1:7900.
+One Node process (`hub/server.js`) serves the page, the vendored browser libraries, and the WebSocket endpoints. Nothing listens on a public interface: cloudflared makes an outbound connection to Cloudflare and forwards requests for the hostname to 127.0.0.1:7900.
+
+With `DESKPORT_RELAY=1` the host work moves out of that process into the agent shim, a child process that speaks the hub and agent protocol ([protocol.md](protocol.md)) to the hub on loopback. The browser sees no difference:
+
+```
+browser ─▶ … ─▶ hub (hub/server.js :7900) ─▶ /agent/v1/control, /agent/v1/stream/<id> ◀─ agent shim (shim/agent.js)
+                                                                                           ├─ guacd, video encoder
+                                                                                           └─ node-pty ─▶ tmux
+```
 
 ## Source layout
 
@@ -17,8 +25,13 @@ One Node process (`hub/server.js`) serves the page, the vendored browser librari
 | `hub/config.js` | Loads `deskport.env` and `rdp.env` from `~/.config/deskport` (or `DESKPORT_CONFIG_DIR`), builds the config object, and validates it. Variables already in the environment win over the files. |
 | `hub/auth.js` | Verifies the Cloudflare Access JWT, and checks WebSocket `Origin`. |
 | `hub/server.js` | Starts one host: authentication, security headers, and wiring of the API, the UI and the WebSocket upgrade router (by host and endpoint). |
-| `hub/api.js` | The JSON API of one host: `/api/me`, `/api/host`, `/api/hosts`, `/api/session`, `/api/session/stop`. |
+| `hub/api.js` | The JSON API of one host: `/api/me`, `/api/host`, `/api/hosts` from the hub, and `/api/session`, `/api/session/stop`, `/api/monitors` and `/api/files/...` from the machine (in process or through its agent). |
 | `hub/ui.js` | The page, and every file it loads (its own and the vendored libraries) from memory under `/v/<content hash>/`, precompressed. Not mounted when `DESKPORT_UI=0`. |
+| `hub/agents.js` | The hub's side of the protocol: agents' keys, control sockets, API requests to an agent, and the relay that pairs a browser's socket with the stream socket the agent dials. File streams are written to the HTTP response. |
+| `hub/protocol.js` | Protocol constants, Ed25519 key generation, upgrade signing and checking, and which close codes are passed on. Used by both sides. |
+| `shim/host.js` | This machine's host work as one object: the screen, video and terminal endpoints and the machine's API (`/api/session`, `/api/session/stop`, `/api/monitors`). The hub uses it in its own process, or the agent shim does. |
+| `shim/agent.js` | The agent shim: connects to the hub, answers `open` and `request`, reconnects with backoff, exits when the hub does. Gets the hub's URL, its id and its private key in the environment, which it removes at start. |
+| `shim/files.js` | File streams for xdg-open's files: status and headers, then the body, with single byte ranges. |
 | `hub/hosts.js` | This host's identity, the list of other hosts, and `/h/<id>/` path routing (multi-host groundwork, see [multi-host.md](multi-host.md)). |
 | `shim/guac.js` | Guacamole protocol encoder and parser, and the bridge between a browser WebSocket and a guacd TCP connection. |
 | `shim/scaler.js` | Shrinks and re-encodes the screen stream for the Resolution and Quality settings. |
@@ -159,11 +172,22 @@ xterm draws with its WebGL renderer, and falls back to the DOM renderer if WebGL
 - **tmux's menu.** Right click goes to tmux, not the browser's menu, while a program has the mouse. On touch, a long press released without moving, or a two-finger tap, sends a right press without its release: tmux closes the menu it opens on the press if a release follows, and keeps it until a tap picks an item or lands outside. The button-less mousemove a browser sends before a tap's mousedown is dropped for the same reason.
 - **xdg-open.** The bridge starts the tmux client with `bin/` first on PATH and `BROWSER=bin/xdg-open`, and sets both in the session's environment (`tmuxArgs()`), so new windows and panes get them; shells that were already running keep their own. `bin/xdg-open` asks tmux which client was used last in its session and posts the target to each deskport server's socket, `$XDG_RUNTIME_DIR/deskport/open-<port>.sock` (mode 600, `shim/opener.js`). The server whose bridge owns that client sends `{"type":"open"}` to its page, which shows the link in a toast with an Open button, since browsers only open tabs from a tap. Files are served at `/api/files/<random token>/<name>` for 15 minutes; HTML, SVG and XML files get a `sandbox` CSP so they cannot run scripts on deskport's origin. Only http, https, mailto, tel and sms links are passed on. In every other case (no deskport client was used last, no server answers, a directory) the script runs the system `xdg-open`.
 
+## Relay (DESKPORT_RELAY=1)
+
+At start the hub makes an Ed25519 key pair for its own machine, registers the public key under its host id, and starts `shim/agent.js` with the private key in its environment. The shim signs every upgrade (`/agent/v1/control`, then one `/agent/v1/stream/<id>` per browser socket) as [protocol.md](protocol.md) says. When a browser opens `/ws/screen`, `/ws/video` or `/ws/term`, the hub checks the person as before, accepts the socket with the same compression as without the relay, and sends `open` with the browser's query; the shim dials the stream and hands it to the same endpoint code as the in-process path (`shim/host.js`). From then on the hub copies messages unchanged both ways. `/api/session`, `/api/session/stop` and `/api/monitors` go over `request`, and `/api/files/...` over a `file` stream.
+
+What changes underneath:
+
+- `pacing.js` reads `bufferedAmount` of its own socket, which is now the shim's loopback socket to the hub. Without the relay it was the socket to cloudflared, also on loopback, so in both cases it sees only the first local hop; what the link has not carried yet waits in cloudflared or, with the relay, in the hub.
+- The terminal's WebSocket pings go between the shim and the hub; the hub pings the browser every 25 s itself.
+- A file's body passes through the hub's memory as fast as the shim reads it.
+
 ## Processes on the host
 
 | Process | Managed by | Listens on |
 | --- | --- | --- |
 | deskport | `deskport.service` (systemd user) | 127.0.0.1:7900 |
+| agent shim (`shim/agent.js`) | deskport, with `DESKPORT_RELAY=1`; restarted if it exits, exits with deskport | none (dials the hub on loopback) |
 | cloudflared | `deskport-tunnel.service` (systemd user) | outbound only |
 | guacd | Docker, `restart: unless-stopped` | 127.0.0.1:4822 |
 | video encoder (`scripts/video-encoder.py`) | deskport, one per screen connection with a video encoding | none (stdin and stdout) |

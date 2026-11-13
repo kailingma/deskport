@@ -42,4 +42,4 @@ GNOME on the separate desktop draws only one or two frames per overview press, s
 
 ## Results
 
-One JSON file per run, `bench/results/<date>-<label>.json`, with the commit, whether the tree was dirty, the link profiles and every case's raw numbers. The table shows the median over runs. `baseline` is the reference for the current path.
+One JSON file per run, `bench/results/<date>-<label>.json`, with the commit, whether the tree was dirty, the server settings that change the path (`DESKPORT_RELAY`, passed on from the bench's environment), the link profiles and every case's raw numbers. The table shows the median over runs. `baseline` is the reference for the current path.

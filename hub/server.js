@@ -6,20 +6,23 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { config, validateConfig } from './config.js';
 import { createAuthenticator, AuthError, sameOrigin } from './auth.js';
-import { handleScreen, SCREEN_SOURCES } from '../shim/guac.js';
-import { handleTerminal } from '../shim/terminal.js';
-import { createSessionControl } from '../shim/session.js';
+import { spawn } from 'node:child_process';
+import { SCREEN_SOURCES } from '../shim/guac.js';
+import { createLocalHost } from '../shim/host.js';
 import { createHostRegistry, routeFor } from './hosts.js';
 import { createApi } from './api.js';
-import { createMonitors } from '../shim/monitors.js';
 import { createUi } from './ui.js';
-import { createOpener } from '../shim/opener.js';
-import { createVideoHub } from '../shim/video.js';
+import { createAgentHub, AgentUnavailable } from './agents.js';
+import { generateAgentKey, KINDS } from './protocol.js';
 
 // Starts one deskport host: authentication and security headers, the API, the
 // web page (unless DESKPORT_UI=0), and the screen and terminal WebSockets.
 // Requests may be addressed to this host directly (/api/..., /ws/...) or by id
 // (/h/<id>/api/..., /h/<id>/ws/...); ids of other hosts get 501 for now.
+//
+// This machine's host work (shim/host.js) runs in this process, or with
+// DESKPORT_RELAY=1 in the agent shim (shim/agent.js), a child process that
+// speaks docs/protocol.md to this hub on loopback.
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { version } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -35,27 +38,35 @@ if (!config.ui) log('DESKPORT_UI=0: serving the API and WebSockets only, no web 
 
 const authenticate = createAuthenticator(config);
 const hosts = createHostRegistry({ config, sources: SCREEN_SOURCES, version, log });
-const session = createSessionControl({
-  unit: config.rdp.sessionUnit,
-  host: config.rdp.hostname,
-  port: config.rdp.sessionPort,
-  log,
-});
-// The desktop on the monitor is this user's main session bus.
-const mainBus = process.env.DBUS_SESSION_BUS_ADDRESS || `unix:path=/run/user/${process.getuid()}/bus`;
-const monitors = createMonitors({
-  bus: mainBus,
-  id: String(config.port),
-  log,
-});
-monitors.restoreLeftover();
-const opener = createOpener({
-  dir: path.join(process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`, 'deskport'),
-  port: config.port,
-  log,
-});
-const terminal = { ...config.terminal, binDir: path.join(root, 'bin'), opener };
-const video = createVideoHub({ log });
+const agents = createAgentHub({ log, version });
+const selfId = hosts.self.id;
+const local = config.relay ? null : createLocalHost({ config, root, log });
+if (config.relay) log('DESKPORT_RELAY=1: host work runs in the agent shim');
+
+// The machine's API and streams, in this process or through its agent.
+const FILE_HEADERS = ['range', 'if-none-match', 'if-modified-since'];
+const machine = local
+  ? {
+      request: ({ method, path: p }) => local.requests[`${method} ${p}`](),
+      file: (req, res) => local.opener.serveFile(req, res),
+      stream: (kind, ws, req) => local.streams[kind](ws, req.url.replace(/^\/h\/[^/?]+/, '')),
+    }
+  : {
+      request: (r) => agents.request(selfId, r).catch((err) => {
+        if (err instanceof AgentUnavailable) return { status: 503, body: { error: err.message } };
+        throw err;
+      }),
+      file: (req, res) => agents.file(selfId, {
+        token: req.params.token,
+        name: req.params.name,
+        headers: Object.fromEntries(FILE_HEADERS.filter((h) => req.headers[h]).map((h) => [h, req.headers[h]])),
+        user: { email: req.user.email },
+      }, res),
+      stream: (kind, ws, req) => agents.openStream(selfId, kind, ws, {
+        query: new URL(req.url, 'http://localhost').search,
+        user: { email: req.user.email },
+      }),
+    };
 
 // ---------- HTTP ----------
 
@@ -84,7 +95,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const api = createApi({ hosts, session, monitors, opener });
+const api = createApi({ hosts, machine });
 app.use(api);
 app.use('/h/:hostId', (req, res, next) => {
   const host = hosts.get(req.params.hostId);
@@ -118,9 +129,9 @@ const termWss = new WebSocketServer({
 // Video frames (video.js) are already compressed.
 const videoWss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
 const endpoints = {
-  '/ws/screen': { wss: screenWss, open: (ws, req) => handleScreen(ws, req, { ...config, session, monitors, video, mainBus }, log) },
-  '/ws/video': { wss: videoWss, open: (ws, req) => video.open(ws, req) },
-  '/ws/term': { wss: termWss, open: (ws, req) => handleTerminal(ws, req, terminal, log) },
+  '/ws/screen': screenWss,
+  '/ws/video': videoWss,
+  '/ws/term': termWss,
 };
 
 function reject(socket, status, text) {
@@ -130,6 +141,8 @@ function reject(socket, status, text) {
 
 server.on('upgrade', async (req, socket, head) => {
   const { pathname } = new URL(req.url, 'http://localhost');
+  // Agents sign their own upgrades (docs/protocol.md); no person check there.
+  if (agents.handles(pathname)) return agents.upgrade(req, socket, head);
   const route = routeFor(pathname);
   const endpoint = endpoints[route.path];
   const host = hosts.get(route.hostId);
@@ -148,21 +161,46 @@ server.on('upgrade', async (req, socket, head) => {
     log(`denied upgrade ${pathname}: controlling other hosts is not implemented yet`);
     return reject(socket, 501, 'Not Implemented');
   }
-  endpoint.wss.handleUpgrade(req, socket, head, (ws) => {
+  endpoint.handleUpgrade(req, socket, head, (ws) => {
     log(`${pathname} opened by ${req.user.email}`);
-    endpoint.open(ws, req);
+    machine.stream(KINDS[route.path], ws, req);
   });
 });
 
+// The agent shim for this machine, restarted if it exits.
+let shim = null;
+let stopping = false;
+function startShim() {
+  const key = generateAgentKey();
+  agents.register(selfId, key.publicKey);
+  const hubHost = config.host.includes(':') ? `[${config.host}]` : config.host;
+  shim = spawn(process.execPath, [path.join(root, 'shim/agent.js')], {
+    cwd: root,
+    env: { ...process.env, DESKPORT_AGENT_HUB: `ws://${hubHost}:${config.port}`, DESKPORT_AGENT_ID: selfId, DESKPORT_AGENT_KEY: key.privateKeyPem },
+    stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+  });
+  const started = Date.now();
+  shim.on('exit', (code, signal) => {
+    shim = null;
+    if (stopping) return;
+    log(`agent shim exited (${signal || code}); restarting`);
+    setTimeout(startShim, Date.now() - started > 10_000 ? 0 : 2000);
+  });
+}
+
 server.listen(config.port, config.host, () => {
   log(`host "${hosts.self.id}" listening on http://${config.host}:${config.port}`);
+  if (config.relay) startShim();
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     log(`${sig}, shutting down`);
+    stopping = true;
     server.close();
-    opener.close();
+    local?.close();
+    agents.close();
+    shim?.kill('SIGTERM');
     for (const c of [...screenWss.clients, ...videoWss.clients, ...termWss.clients]) c.terminate();
     setTimeout(() => process.exit(0), 500).unref();
   });

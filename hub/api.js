@@ -13,7 +13,7 @@ import { sameOrigin } from './auth.js';
  *   GET  /api/monitors       the physical monitors My monitor can show
  *   GET  /api/files/:token/:name  a file opened with xdg-open in the terminal
  */
-export function createApi({ hosts, session, monitors, opener }) {
+export function createApi({ hosts, machine }) {
   const api = express.Router();
   const noStore = (res) => res.set('Cache-Control', 'no-store');
 
@@ -29,29 +29,21 @@ export function createApi({ hosts, session, monitors, opener }) {
     noStore(res).json(hosts.list());
   });
 
-  api.get('/api/session', async (req, res) => {
-    noStore(res).json(await session.state());
-  });
-
-  api.post('/api/session/stop', async (req, res) => {
-    if (!sameOrigin(req)) return res.status(403).json({ error: 'cross-origin request' });
+  // Answered by the machine: in this process, or by its agent (hub/agents.js).
+  const forward = (method, path) => async (req, res, next) => {
+    if (method !== 'GET' && !sameOrigin(req)) return res.status(403).json({ error: 'cross-origin request' });
     try {
-      await session.stop();
-      res.json(await session.state());
+      const { status, body } = await machine.request({ method, path, query: req.query, user: { email: req.user.email } });
+      noStore(res).status(status).json(body);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      next(err);
     }
-  });
+  };
+  api.get('/api/session', forward('GET', '/api/session'));
+  api.post('/api/session/stop', forward('POST', '/api/session/stop'));
+  api.get('/api/monitors', forward('GET', '/api/monitors'));
 
-  api.get('/api/monitors', async (req, res) => {
-    try {
-      noStore(res).json(await monitors.list());
-    } catch (err) {
-      res.status(500).json({ error: err.message.trim().split('\n').at(-1) });
-    }
-  });
-
-  if (opener) api.get('/api/files/:token/:name', (req, res) => opener.serveFile(req, res));
+  if (machine.file) api.get('/api/files/:token/:name', (req, res) => machine.file(req, res));
 
   return api;
 }
