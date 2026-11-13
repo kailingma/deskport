@@ -23,6 +23,9 @@ const MOVE_SLOP = 10;
  */
 const RECEIVE_TIMEOUT_MS = 8000;
 const MAX_DROPS = 5;
+// Device pixels a picture may fall short of the page and still be drawn 1:1
+// (sessionLayout() in src/guac.js rounds down by up to 4 × scale - 1).
+const NATIVE_SLACK = 16;
 const STABLE_MS = 10000;
 
 export function createScreen({ host, setStatus, toast }) {
@@ -61,7 +64,16 @@ export function createScreen({ host, setStatus, toast }) {
     const display = client.getDisplay();
     const w = display.getWidth();
     const h = display.getHeight();
-    return w && h ? Math.min(wrap.clientWidth / w, wrap.clientHeight / h) : 0;
+    if (!w || !h) return 0;
+    // A picture a few device pixels smaller than the page (the separate desktop
+    // is rounded down to whole logical pixels) is drawn one remote pixel per
+    // device pixel. Stretching 2936 px over 2940 would resample every pixel and
+    // soften text on HiDPI screens.
+    const ratio = window.devicePixelRatio || 1;
+    const spareW = wrap.clientWidth * ratio - w;
+    const spareH = wrap.clientHeight * ratio - h;
+    if (spareW >= 0 && spareH >= 0 && spareW <= NATIVE_SLACK && spareH <= NATIVE_SLACK) return 1 / ratio;
+    return Math.min(wrap.clientWidth / w, wrap.clientHeight / h);
   }
 
   function rescale() {
