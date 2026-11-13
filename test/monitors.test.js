@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseSize, currentConfig, describe, plan } from '../src/monitors.js';
+import { chooseSize, currentConfig, describe, plan } from '../shim/monitors.js';
 
 const mode = (w, h, rate, current = false) => ({ id: `${w}x${h}@${rate}`, width: w, height: h, rate, scales: w >= 1920 ? [1, 1.5, 2] : [1], current });
 const SIZES = [[3840, 2160], [2560, 1440], [1920, 1080], [1280, 720], [1024, 768], [800, 600]];

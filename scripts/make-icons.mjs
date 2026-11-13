@@ -1,4 +1,4 @@
-// Renders the app icons in public/icons/ from the same geometry as public/favicon.svg.
+// Renders the app icons in web/icons/ from the same geometry as web/favicon.svg.
 // No dependencies: a small supersampled rasteriser and PNG encoder.
 // Run: node scripts/make-icons.mjs
 import fs from 'node:fs';
@@ -9,7 +9,7 @@ const BG_A = [61, 123, 255];
 const BG_B = [23, 57, 196];
 const FG = [255, 255, 255];
 
-// Glyph in a 32-unit box, matching public/favicon.svg: a "d" whose bowl is a screen,
+// Glyph in a 32-unit box, matching web/favicon.svg: a "d" whose bowl is a screen,
 // with a text cursor inside.
 const STROKE = 2.6;
 const bowl = { x: 8.5, y: 12.5, w: 14.5, h: 12, r: 3 };
@@ -85,11 +85,11 @@ function png(size, rgba) {
   ]);
 }
 
-const out = new URL('../public/icons/', import.meta.url);
+const out = new URL('../web/icons/', import.meta.url);
 fs.mkdirSync(out, { recursive: true });
 // Full-bleed squares: iOS and maskable Android icons apply their own corner mask.
 // The glyph fills the same share of the square as in the favicon; maskable icons get extra margin.
 for (const [name, size, scale] of [['apple-touch-icon.png', 180, 1], ['icon-192.png', 192, 0.8], ['icon-512.png', 512, 0.8]]) {
   fs.writeFileSync(new URL(name, out), render(size, scale));
-  console.log(`wrote public/icons/${name}`);
+  console.log(`wrote web/icons/${name}`);
 }

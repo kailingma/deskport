@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hasDesktopLogin } from '../src/guac.js';
+import { hasDesktopLogin } from '../shim/guac.js';
 
 // Shapes from `loginctl list-sessions -j`.
 const manager = { session: '1', uid: 1000, user: 'owner', seat: null, class: 'manager', tty: null };

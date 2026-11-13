@@ -5,8 +5,8 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import { classify, createOpener } from '../src/opener.js';
-import { sessionVars, tmuxArgs } from '../src/terminal.js';
+import { classify, createOpener } from '../shim/opener.js';
+import { sessionVars, tmuxArgs } from '../shim/terminal.js';
 
 test('classify accepts web, mail and phone links and absolute paths only', () => {
   assert.deepEqual(classify('https://example.com/a b'), { url: 'https://example.com/a%20b' });

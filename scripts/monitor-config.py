@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Reads or applies GNOME's monitor configuration through Mutter's DisplayConfig.
 
-Used by src/monitors.js for "Match this device" on My monitor. Applied
+Used by shim/monitors.js for "Match this device" on My monitor. Applied
 configurations are temporary (method 1): nothing is written to monitors.xml,
-and src/monitors.js puts the previous configuration back when the last viewer
+and shim/monitors.js puts the previous configuration back when the last viewer
 disconnects.
 
 Usage:

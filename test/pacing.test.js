@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAckAhead, lastSyncTimestamp } from '../src/pacing.js';
+import { createAckAhead, lastSyncTimestamp } from '../shim/pacing.js';
 
 test('acknowledges frames ahead of the browser, up to the limit', () => {
   const acked = [];

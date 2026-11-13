@@ -85,11 +85,12 @@ Collected by the agent, sent on the control socket every second while someone is
 ## Repository layout (target)
 
 ```
-hub/        Node: server, auth, registry, relay, metrics store (today's src/, minus host work)
+hub/        Node: server, auth, registry, relay, metrics store
+shim/       Node agent shim: today's host code, speaking the protocol on loopback until the Rust agent replaces it
 agent/      Rust crate: capture, encode, input, terminal, metrics, install and update
-web/        the page (today's public/)
+web/        the page
 docs/       architecture.md (overview), hub.md, agent.md, protocol.md, roadmap.md, decisions.md, setup.md
-bench/      measurement scripts (today's scripts/measure-*.mjs) and saved baselines
+bench/      the bench, older measurement scripts and saved baselines
 scripts/    host helpers still needed (desktop-session.sh and friends) until the agent absorbs them
 test/       hub tests; agent tests live in agent/
 ```

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GuacParser, encode } from '../src/guac.js';
+import { GuacParser, encode } from '../shim/guac.js';
 
 test('encode counts code points', () => {
   assert.equal(encode(['select', 'rdp']), '6.select,3.rdp;');

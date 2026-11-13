@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import { GuacParser, encode } from '../src/guac.js';
-import { createScaler } from '../src/scaler.js';
+import { GuacParser, encode } from '../shim/guac.js';
+import { createScaler } from '../shim/scaler.js';
 
 function run(opts, input) {
   return new Promise((resolve) => {

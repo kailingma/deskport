@@ -180,7 +180,7 @@ A neutral grey ladder carries almost everything; blue is the only chromatic voic
 - **OK** green (oklch(0.6 0.15 150) / oklch(0.74 0.16 150)), **Busy** amber (oklch(0.7 0.15 75) / oklch(0.82 0.14 80), pulses), **Bad** red (oklch(0.58 0.21 27) / oklch(0.7 0.18 25), also colours the badge text). Idle uses Ink Secondary.
 
 ### Terminal colour schemes
-Six schemes in `public/js/themes.js`, chosen in Settings: deskport dark (default, #0f1012 ground, cursor #6b9cff), deskport light (#fbfbfb, cursor #2463eb), Solarized dark and light, Nord, Gruvbox dark. The deskport pair is tuned to the UI blue; the others are the established community palettes and are not part of the interface palette.
+Six schemes in `web/js/themes.js`, chosen in Settings: deskport dark (default, #0f1012 ground, cursor #6b9cff), deskport light (#fbfbfb, cursor #2463eb), Solarized dark and light, Nord, Gruvbox dark. The deskport pair is tuned to the UI blue; the others are the established community palettes and are not part of the interface palette.
 
 ### Named Rules
 **The One Blue Rule.** Blue marks the thing you can act on or that is selected. It is never decoration, and no second hue is introduced for emphasis.
@@ -263,7 +263,7 @@ Rounded rectangles with small, consistent corners: 6px inside compact groups (se
 Short and functional: 0.15s colour transitions on controls, 0.2 to 0.3s ease-out (`cubic-bezier(0.22, 1, 0.36, 1)`) for the toolbar, sheets, settings and toast, a 1.4s pulse on the busy dot, and a 0.18s touch-ring entrance. Reduced motion collapses all durations to near zero.
 
 ### App icon
-The one brand asset, in `public/favicon.svg` and rendered to PNG by `scripts/make-icons.mjs`: a lowercase "d" whose bowl is a rounded screen with a text cursor inside, white strokes (2.6 units on a 32 box) on a diagonal blue gradient from #3d7bff to #1739c4, 8-unit corner radius. The top bar shows the same glyph at 24px on the same gradient.
+The one brand asset, in `web/favicon.svg` and rendered to PNG by `scripts/make-icons.mjs`: a lowercase "d" whose bowl is a rounded screen with a text cursor inside, white strokes (2.6 units on a 32 box) on a diagonal blue gradient from #3d7bff to #1739c4, 8-unit corner radius. The top bar shows the same glyph at 24px on the same gradient.
 
 ## Do's and Don'ts
 

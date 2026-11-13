@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRateControl } from '../src/ratecontrol.js';
+import { createRateControl } from '../shim/ratecontrol.js';
 
 /**
  * Simulates a link of `linkKbps` with round trip `rttMs`: frames are produced

@@ -20,7 +20,7 @@ const PONG_MS = 5000;
 // How long a touch selection waits for tmux to send the copied text back.
 const COPY_WAIT_MS = 5000;
 const TWO_TAP_MS = 350;
-// Links the page will offer from xdg-open (src/opener.js).
+// Links the page will offer from xdg-open (shim/opener.js).
 const OPENABLE = /^(https?:|mailto:|tel:|sms:|\/api\/files\/)/i;
 
 /**

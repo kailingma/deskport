@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Records one monitor through Mutter's ScreenCast API and encodes it as video.
 
-Used by src/video.js for the Screen view's AV1 and H.264 encodings. Mutter hands
+Used by shim/video.js for the Screen view's AV1 and H.264 encodings. Mutter hands
 the monitor's frames to PipeWire; GStreamer scales them to the size the browser
 receives and encodes them, AV1 with libaom's realtime profile on the processor,
 or H.264 with NVENC on the graphics card. Recording is read-only: nothing about

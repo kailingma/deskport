@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHostRegistry, routeFor, slugify, LOCAL } from '../src/hosts.js';
+import { createHostRegistry, routeFor, slugify, LOCAL } from '../hub/hosts.js';
 
 test('routeFor splits host-addressed paths', () => {
   assert.deepEqual(routeFor('/ws/screen'), { hostId: LOCAL, path: '/ws/screen' });

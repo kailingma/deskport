@@ -27,7 +27,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$REPO
-ExecStart=$NODE src/server.js
+ExecStart=$NODE hub/server.js
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production

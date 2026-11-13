@@ -1,5 +1,5 @@
 #!/bin/sh
-# xdg-open for programs in deskport's terminal (see src/opener.js).
+# xdg-open for programs in deskport's terminal (see shim/opener.js).
 #
 # When the tmux client used last in this pane's session belongs to a deskport
 # terminal, the link or file opens in that browser. Otherwise, or if no

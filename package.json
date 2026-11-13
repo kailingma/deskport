@@ -4,14 +4,14 @@
   "private": true,
   "description": "This computer's screen and a persistent terminal in the browser, behind Cloudflare Access.",
   "type": "module",
-  "main": "src/server.js",
+  "main": "hub/server.js",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "DESKPORT_INSECURE_DEV=1 node --watch src/server.js",
-    "check": "node --check src/server.js && node --check src/auth.js && node --check src/guac.js && node --check src/scaler.js && node --check src/session.js && node --check src/hosts.js && node --check src/api.js && node --check src/ui.js && node --check src/terminal.js && node --check src/opener.js && sh -n bin/xdg-open && node --check src/pacing.js && node --check src/monitors.js && node --check src/video.js && node --check src/ratecontrol.js && node --check public/app.js && python3 -m py_compile scripts/session-scale.py scripts/session-systemd-proxy.py scripts/monitor-config.py scripts/video-encoder.py && for f in bench/*.mjs bench/lib/*.mjs; do node --check \"$f\"; done && for f in public/js/*.js; do node --check \"$f\"; done",
+    "start": "node hub/server.js",
+    "dev": "DESKPORT_INSECURE_DEV=1 node --watch hub/server.js",
+    "check": "for f in hub/*.js shim/*.js src/*.js web/*.js web/js/*.js bench/*.mjs bench/lib/*.mjs; do node --check \"$f\" || exit 1; done && sh -n bin/xdg-open && python3 -m py_compile scripts/session-scale.py scripts/session-systemd-proxy.py scripts/monitor-config.py scripts/video-encoder.py",
     "test": "node --test 'test/*.test.js'",
     "bench": "node bench/run.mjs"
   },

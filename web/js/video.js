@@ -1,4 +1,4 @@
-// The Screen view's video encodings (src/video.js on the server).
+// The Screen view's video encodings (shim/video.js on the server).
 //
 // Frames arrive on their own WebSocket as binary messages: u32 frame number,
 // u8 1 for a keyframe, 3 zero bytes, then the encoded frame. WebCodecs decodes

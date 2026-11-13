@@ -110,7 +110,7 @@ sudo loginctl enable-linger "$USER"
 
 `install-services.sh` writes three systemd user units into `~/.config/systemd/user/`, and enables and starts the first two:
 
-- `deskport.service` runs `src/server.js` with the `node` on your `PATH` at install time. For fnm it uses the stable `default` alias path.
+- `deskport.service` runs `hub/server.js` with the `node` on your `PATH` at install time. For fnm it uses the stable `default` alias path.
 - `deskport-tunnel.service` runs `cloudflared` with `~/.cloudflared/deskport.yml` (set `DESKPORT_TUNNEL_CONFIG` to use another file). It is skipped when that file does not exist.
 - `deskport-session.service` runs `scripts/desktop-session.sh`, the separate desktop. It is not enabled: deskport starts it the first time someone picks Show: Separate desktop, and it runs until ended from the settings (`systemctl --user stop deskport-session` does the same). It is capped at 3 GB of memory.
 

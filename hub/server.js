@@ -6,15 +6,15 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { config, validateConfig } from './config.js';
 import { createAuthenticator, AuthError, sameOrigin } from './auth.js';
-import { handleScreen, SCREEN_SOURCES } from './guac.js';
-import { handleTerminal } from './terminal.js';
-import { createSessionControl } from './session.js';
+import { handleScreen, SCREEN_SOURCES } from '../shim/guac.js';
+import { handleTerminal } from '../shim/terminal.js';
+import { createSessionControl } from '../shim/session.js';
 import { createHostRegistry, routeFor } from './hosts.js';
 import { createApi } from './api.js';
-import { createMonitors } from './monitors.js';
+import { createMonitors } from '../shim/monitors.js';
 import { createUi } from './ui.js';
-import { createOpener } from './opener.js';
-import { createVideoHub } from './video.js';
+import { createOpener } from '../shim/opener.js';
+import { createVideoHub } from '../shim/video.js';
 
 // Starts one deskport host: authentication and security headers, the API, the
 // web page (unless DESKPORT_UI=0), and the screen and terminal WebSockets.

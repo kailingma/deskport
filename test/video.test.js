@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDrawFilter, codecString } from '../src/video.js';
-import { GuacParser, encode } from '../src/guac.js';
+import { createDrawFilter, codecString } from '../shim/video.js';
+import { GuacParser, encode } from '../shim/guac.js';
 
 const parse = (...instructions) => new GuacParser().push(instructions.map((i) => encode(i)).join(''));
 const ops = (list) => list.map((i) => i.elements[0]);

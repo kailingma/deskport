@@ -43,7 +43,7 @@ async function freePort() {
 async function startServer() {
   const port = await freePort();
   const tmux = `bench-${process.pid}`;
-  const child = spawn(process.execPath, ['src/server.js'], {
+  const child = spawn(process.execPath, ['hub/server.js'], {
     cwd: root,
     env: { ...process.env, DESKPORT_PORT: String(port), DESKPORT_INSECURE_DEV: '1', DESKPORT_TMUX_SESSION: tmux },
     stdio: ['ignore', 'pipe', 'pipe'],

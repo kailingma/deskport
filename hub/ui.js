@@ -46,7 +46,7 @@ const gzip = promisify(zlib.gzip);
 
 /** Reads every page file and vendored file into memory, keyed by its path under /v/<hash>/. */
 function readAssets(root) {
-  const publicDir = path.join(root, 'public');
+  const publicDir = path.join(root, 'web');
   const files = new Map();
   const walk = (dir, prefix) => {
     for (const name of fs.readdirSync(dir).sort()) {

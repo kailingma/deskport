@@ -5,7 +5,7 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 ## Run, test, deploy
 
 - Node comes from fnm, and new shells may not have it on `PATH`. Prefix commands with `export PATH="$HOME/.local/share/fnm/aliases/default/bin:$PATH"`.
-- `npm test` runs the `node --test` suite. `npm run check` syntax-checks every file it lists; add new `src/` files to that script.
+- `npm test` runs the `node --test` suite. `npm run check` syntax-checks every file in `hub/`, `shim/`, `web/` and `bench/`, the shell and Python helpers.
 - Dev server: `.claude/launch.json` entry `deskport-dev` (port 7901, `--watch`, Access checks off), or `deskport-test` (port 7902, tmux session `deskport-test`, safe for terminal tests). The production server is `deskport.service` on 7900.
 - Deploy: `systemctl --user restart deskport`. After changing a unit or `scripts/install-services.sh`, run that script instead; it also restarts the tunnel.
 - Do not restart or stop `deskport-session.service` (the separate desktop) without asking: apps the owner has open in it close. Changes to `scripts/desktop-session.sh` apply on its next start.
@@ -26,14 +26,14 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 - `grdctl --headless rdp enable` also starts `gnome-remote-desktop-headless.service`, which conflicts with `gnome-remote-desktop.service` and stops desktop sharing. Set the headless settings with `gsettings` (see `scripts/setup-rdp.sh`).
 - A second gnome-shell for the same user needs the private bus and runtime directory that `desktop-session.sh` sets up. Without them it replaces the main session's accessibility socket (`$XDG_RUNTIME_DIR/at-spi/bus`). The private runtime directory needs links to the real one's per-user entries; without the `systemd` link, terminal apps fail with "Failed to connect to user scope bus".
 - Unix socket paths are limited to 108 bytes. A long `XDG_RUNTIME_DIR` fails with "Argument list too long".
-- guacd turns the browser's size into a smaller desktop size using its `dpi` argument unless `dpi` is passed explicitly (a 2031 px wide window became 1352). `sessionLayout()` in `src/guac.js` passes it.
+- guacd turns the browser's size into a smaller desktop size using its `dpi` argument unless `dpi` is passed explicitly (a 2031 px wide window became 1352). `sessionLayout()` in `shim/guac.js` passes it.
 - GNOME ignores the client's DPI. Its virtual monitors offer only whole-number scales, and only when the scaled desktop keeps at least 800 × 480 logical pixels.
 - GNOME mirror mode ignores the requested size, colour depth and most RDP experience flags. Measure with `bench/measure-screen.mjs` before claiming a speed change.
 - When pacing frames, coalesce held `sync` acknowledgements; never queue them. Queueing built up seconds of typing lag.
 - Guacamole element lengths count code points, and `WebSocketTunnel` needs whole instructions per WebSocket frame.
 - xterm's fit addon measures the terminal's parent including padding. Keep xterm inside the unpadded `.term-box`. Its viewport defaults to a black background, and xterm 6 draws its own scrollbar.
 - Screen touch: Guacamole replaces canvas layers mid-gesture, so move and end are handled on the window and filtered by touch identifier. Synthetic wheel events use `DOM_DELTA_LINE`. The owner is happy with the current gestures; fix around them rather than reworking them.
-- tmux closes its right-click menu when the button's release reaches it, and reads a button-less mouse motion as a release. The terminal's touch right click therefore sends only the press (`rightClick()` in `public/js/terminal.js`).
+- tmux closes its right-click menu when the button's release reaches it, and reads a button-less mouse motion as a release. The terminal's touch right click therefore sends only the press (`rightClick()` in `web/js/terminal.js`).
 - iOS: assets are served under content-hash paths because Home Screen apps cache hard. A Home Screen app has its own cookies. iPhone Safari has no Fullscreen API. The CSP blocks inline scripts.
 
 ## Open items

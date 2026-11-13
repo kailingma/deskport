@@ -159,7 +159,7 @@ Configuration lives outside the repo in `~/.config/deskport/` (see [deskport.env
 npm run dev      # watch mode, Access checks off, loopback only
 npm test         # protocol parser tests
 npm run check    # syntax check of every source file
-node scripts/make-icons.mjs   # regenerate public/icons/*.png from the icon geometry
+node scripts/make-icons.mjs   # regenerate web/icons/*.png from the icon geometry
 node bench/measure-screen.mjs 15 ws://127.0.0.1:7900   # bandwidth per quality preset
 node bench/measure-typing.mjs ws://127.0.0.1:7900      # key-to-screen latency, on the separate desktop
 ```

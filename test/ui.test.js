@@ -4,7 +4,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { createUi } from '../src/ui.js';
+import { createUi } from '../hub/ui.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 

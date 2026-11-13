@@ -67,7 +67,7 @@ function shellEnv() {
  *   counts JavaScript string length) and {type:"ping", id}.
  * Server -> client: terminal output as text frames, and binary frames holding
  *   JSON: {type:"open", url, label, file?} when a program in the terminal runs
- *   xdg-open (src/opener.js), and with ?flow=1 {type:"pong", id}.
+ *   xdg-open (shim/opener.js), and with ?flow=1 {type:"pong", id}.
  */
 export function handleTerminal(ws, req, { tmuxSession, cwd, binDir, opener }, log) {
   const flow = new URL(req.url, 'http://localhost').searchParams.get('flow') === '1';

@@ -20,7 +20,7 @@ browser ──▶ controller  /h/<id>/api/...   ──▶ host <id>  /api/...
                         /h/<id>/ws/term   ──▶            /ws/term
 ```
 
-The alternative, the browser opening each host's URL directly, was rejected. Each host sits behind its own Access application, so the browser would need a separate sign-in and cookie per host. Its WebSockets would also be cross-origin, which deskport refuses on purpose (`sameOrigin` in `src/auth.js`), and the Content Security Policy only allows `connect-src 'self'`. Forwarding keeps one sign-in and leaves every host's security checks as they are.
+The alternative, the browser opening each host's URL directly, was rejected. Each host sits behind its own Access application, so the browser would need a separate sign-in and cookie per host. Its WebSockets would also be cross-origin, which deskport refuses on purpose (`sameOrigin` in `hub/auth.js`), and the Content Security Policy only allows `connect-src 'self'`. Forwarding keeps one sign-in and leaves every host's security checks as they are.
 
 The controller authenticates to other hosts with a Cloudflare Access **service token** (a client ID and secret sent as `CF-Access-Client-Id` / `CF-Access-Client-Secret`). Each host's Access application needs a Service Auth policy for that token, and each host's server needs to accept the service token's JWT, which has no `email` claim. The signed-in person's email would travel in a header the controller sets, and each host would log it next to the token's identity.
 
@@ -28,14 +28,14 @@ The controller authenticates to other hosts with a Cloudflare Access **service t
 
 | Piece | Where | What it does today |
 | --- | --- | --- |
-| Host identity | `config.self` in `src/config.js` | `DESKPORT_HOST_ID` (default: the hostname as a slug) and `DESKPORT_HOST_NAME` (default: the hostname). |
+| Host identity | `config.self` in `hub/config.js` | `DESKPORT_HOST_ID` (default: the hostname as a slug) and `DESKPORT_HOST_NAME` (default: the hostname). |
 | Host description | `GET /api/host` | This host's id, name, version, whether it serves the UI, and its capabilities (screen sources, terminal). A controller will read this from each host. |
 | Host list | `GET /api/hosts`, `hosts.json` | This host, plus any listed in `~/.config/deskport/hosts.json` with status `not-implemented`. |
-| Host-addressed paths | `routeFor()` in `src/hosts.js`, `src/server.js` | `/h/<id>/api/...` and `/h/<id>/ws/...` work for this host's own id (and `local`); other known ids get 501, unknown ids 404. |
-| Optional UI | `DESKPORT_UI=0`, `src/ui.js` | Serves only the API and WebSockets. |
-| Client host object | `public/js/host.js` | Every API call and WebSocket in the page goes through `host.api()`, `host.ws()` and `host.json()`. `createHost({ id })` already builds `/h/<id>` URLs. |
+| Host-addressed paths | `routeFor()` in `hub/hosts.js`, `hub/server.js` | `/h/<id>/api/...` and `/h/<id>/ws/...` work for this host's own id (and `local`); other known ids get 501, unknown ids 404. |
+| Optional UI | `DESKPORT_UI=0`, `hub/ui.js` | Serves only the API and WebSockets. |
+| Client host object | `web/js/host.js` | Every API call and WebSocket in the page goes through `host.api()`, `host.ws()` and `host.json()`. `createHost({ id })` already builds `/h/<id>` URLs. |
 
-The server is split along the same lines: `src/api.js` (the JSON API of one host), `src/ui.js` (the page and its libraries), `src/hosts.js` (identity, the host list and path routing) and `src/server.js` (auth, headers and wiring).
+The server is split along the same lines: `hub/api.js` (the JSON API of one host), `hub/ui.js` (the page and its libraries), `hub/hosts.js` (identity, the host list and path routing) and `hub/server.js` (auth, headers and wiring).
 
 `hosts.json` format:
 

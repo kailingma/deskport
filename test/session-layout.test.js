@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionLayout } from '../src/guac.js';
+import { sessionLayout } from '../shim/guac.js';
 
 test('a 3x phone gets full resolution at scale 2, in whole logical pixels', () => {
   assert.deepEqual(sessionLayout(1170, 2280, 288), { scale: 2, width: 1168, height: 2280, dpi: 288 });

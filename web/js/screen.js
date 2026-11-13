@@ -24,7 +24,7 @@ const MOVE_SLOP = 10;
 const RECEIVE_TIMEOUT_MS = 8000;
 const MAX_DROPS = 5;
 // Device pixels a picture may fall short of the page and still be drawn 1:1
-// (sessionLayout() in src/guac.js rounds down by up to 4 × scale - 1).
+// (sessionLayout() in shim/guac.js rounds down by up to 4 × scale - 1).
 const NATIVE_SLACK = 16;
 const STABLE_MS = 10000;
 
