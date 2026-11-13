@@ -4,6 +4,9 @@ Choices made while building deskport, newest first, with the reason for each. En
 
 ## 2026-11-12
 
+### Hub and agents, dialled out from each machine
+The owner asked for the fastest possible screen, several machines with one install each, a coordination server, and a picker and metrics dashboard per machine. Hosts will keep an outbound connection to a hub (the owner's choice over the controller dialling each host's own tunnel, and over Tailscale only), so a new machine needs no tunnel or Access application. Linux first, Windows later, macOS not planned. The agent will be Rust (single binary, Windows later, no garbage collector in the frame path) and the hub stays Node. Speed is expected from removing guacd, RDP and the extra encodes (GNOME's RemoteDesktop and ScreenCast APIs, already present on the separate desktop), not from the language. The plan and phases are in [roadmap.md](roadmap.md).
+
 ### AV1 and H.264 video for the Screen view
 The owner asked to consider AV1, with settings for its speed and how the screen is transmitted, and a mode that adapts to the connection for the least delay or data, using the existing Prioritize choice.
 

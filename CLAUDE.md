@@ -1,6 +1,6 @@
 # Working on deskport
 
-Read [docs/architecture.md](docs/architecture.md) for how it fits together, [docs/decisions.md](docs/decisions.md) for why, and [docs/multi-host.md](docs/multi-host.md) before touching hosts or paths. DESIGN.md and PRODUCT.md govern the UI.
+Read [docs/architecture.md](docs/architecture.md) for how it fits together, [docs/decisions.md](docs/decisions.md) for why, [docs/multi-host.md](docs/multi-host.md) before touching hosts or paths, and [docs/roadmap.md](docs/roadmap.md) for the hub, agent and fast-path plan. DESIGN.md and PRODUCT.md govern the UI.
 
 ## Run, test, deploy
 

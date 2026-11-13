@@ -1,5 +1,7 @@
 # Multiple hosts (planned)
 
+> Superseded in part (2026-11-12): hosts will dial out to a hub instead of the controller dialling each host's tunnel. See [roadmap.md](roadmap.md). The groundwork listed under "What exists now" still applies.
+
 deskport is built so that several machines can each run it, and one web UI can show and control all of them. Only the groundwork exists today: nothing in the UI changes, and requests for another machine are refused with 501 Not Implemented. This page describes the design the groundwork is for.
 
 ## Roles
