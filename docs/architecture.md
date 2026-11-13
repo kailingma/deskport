@@ -8,7 +8,7 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
 
 One Node process (`hub/server.js`) serves the page, the vendored browser libraries, and the WebSocket endpoints. Nothing listens on a public interface: cloudflared makes an outbound connection to Cloudflare and forwards requests for the hostname to 127.0.0.1:7900.
 
-With `DESKPORT_RELAY=1` the host work moves out of that process into the agent shim, a child process that speaks the hub and agent protocol ([protocol.md](protocol.md)) to the hub on loopback. The browser sees no difference:
+The host work runs in the agent shim, a child process that speaks the hub and agent protocol ([protocol.md](protocol.md)) to the hub on loopback. `DESKPORT_RELAY=0` runs it in the hub's process instead; the browser sees no difference:
 
 ```
 browser ─▶ … ─▶ hub (hub/server.js :7900) ─▶ /agent/v1/control, /agent/v1/stream/<id> ◀─ agent shim (shim/agent.js)
@@ -172,7 +172,7 @@ xterm draws with its WebGL renderer, and falls back to the DOM renderer if WebGL
 - **tmux's menu.** Right click goes to tmux, not the browser's menu, while a program has the mouse. On touch, a long press released without moving, or a two-finger tap, sends a right press without its release: tmux closes the menu it opens on the press if a release follows, and keeps it until a tap picks an item or lands outside. The button-less mousemove a browser sends before a tap's mousedown is dropped for the same reason.
 - **xdg-open.** The bridge starts the tmux client with `bin/` first on PATH and `BROWSER=bin/xdg-open`, and sets both in the session's environment (`tmuxArgs()`), so new windows and panes get them; shells that were already running keep their own. `bin/xdg-open` asks tmux which client was used last in its session and posts the target to each deskport server's socket, `$XDG_RUNTIME_DIR/deskport/open-<port>.sock` (mode 600, `shim/opener.js`). The server whose bridge owns that client sends `{"type":"open"}` to its page, which shows the link in a toast with an Open button, since browsers only open tabs from a tap. Files are served at `/api/files/<random token>/<name>` for 15 minutes; HTML, SVG and XML files get a `sandbox` CSP so they cannot run scripts on deskport's origin. Only http, https, mailto, tel and sms links are passed on. In every other case (no deskport client was used last, no server answers, a directory) the script runs the system `xdg-open`.
 
-## Relay (DESKPORT_RELAY=1)
+## Relay
 
 At start the hub makes an Ed25519 key pair for its own machine, registers the public key under its host id, and starts `shim/agent.js` with the private key in its environment. The shim signs every upgrade (`/agent/v1/control`, then one `/agent/v1/stream/<id>` per browser socket) as [protocol.md](protocol.md) says. When a browser opens `/ws/screen`, `/ws/video` or `/ws/term`, the hub checks the person as before, accepts the socket with the same compression as without the relay, and sends `open` with the browser's query; the shim dials the stream and hands it to the same endpoint code as the in-process path (`shim/host.js`). From then on the hub copies messages unchanged both ways. `/api/session`, `/api/session/stop` and `/api/monitors` go over `request`, and `/api/files/...` over a `file` stream.
 
@@ -187,7 +187,7 @@ What changes underneath:
 | Process | Managed by | Listens on |
 | --- | --- | --- |
 | deskport | `deskport.service` (systemd user) | 127.0.0.1:7900 |
-| agent shim (`shim/agent.js`) | deskport, with `DESKPORT_RELAY=1`; restarted if it exits, exits with deskport | none (dials the hub on loopback) |
+| agent shim (`shim/agent.js`) | deskport (not with `DESKPORT_RELAY=0`); restarted if it exits, exits with deskport | none (dials the hub on loopback) |
 | cloudflared | `deskport-tunnel.service` (systemd user) | outbound only |
 | guacd | Docker, `restart: unless-stopped` | 127.0.0.1:4822 |
 | video encoder (`scripts/video-encoder.py`) | deskport, one per screen connection with a video encoding | none (stdin and stdout) |

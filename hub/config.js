@@ -32,10 +32,10 @@ export const config = {
   // DESKPORT_UI=0 runs the server without the web page: only the API and the
   // WebSockets, for a machine that another host's UI will control.
   ui: env.DESKPORT_UI !== '0',
-  // DESKPORT_RELAY=1 runs this machine's host work in the agent shim, a child
-  // process that talks to this server over the hub and agent protocol
-  // (docs/protocol.md), instead of in this process.
-  relay: env.DESKPORT_RELAY === '1',
+  // This machine's host work runs in the agent shim, a child process that
+  // talks to this server over the hub and agent protocol (docs/protocol.md).
+  // DESKPORT_RELAY=0 runs it in this process instead.
+  relay: env.DESKPORT_RELAY !== '0',
   hostsFile: path.join(configDir, 'hosts.json'),
 
   access: {

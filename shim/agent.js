@@ -10,7 +10,7 @@ import { serveFileStream } from './files.js';
 
 // The agent shim: this machine's host code (shim/host.js) speaking the hub
 // and agent protocol (docs/protocol.md) to a hub on loopback. The hub starts
-// it with DESKPORT_RELAY=1 and hands it the hub's URL, its agent id and its
+// it (unless DESKPORT_RELAY=0) and hands it the hub's URL, its agent id and its
 // private key in the environment, which it removes before starting anything.
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

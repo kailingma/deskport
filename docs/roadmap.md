@@ -1,6 +1,6 @@
 # Roadmap: fast path, hub and agents
 
-Status: phase 0 done, phase 1 next (2026-11-12). This page is the map for the next stage of deskport. Each phase ends with something that works and is measured; nothing is removed until its replacement matches it. Update the status column as phases land, and log choices in [decisions.md](decisions.md).
+Status: phases 0 and 1 done, phase 2 next (2026-11-13). This page is the map for the next stage of deskport. Each phase ends with something that works and is measured; nothing is removed until its replacement matches it. Update the status column as phases land, and log choices in [decisions.md](decisions.md).
 
 ## Goals
 
@@ -43,13 +43,13 @@ This replaces the earlier design in [multi-host.md](multi-host.md), where the co
 
 ## Protocol
 
-Specified in `docs/protocol.md` (written in phase 1) and versioned. Both sides reject versions they do not know.
+Specified in [protocol.md](protocol.md) (version 1, phase 1) and versioned. Both sides reject versions they do not know.
 
 - **Control socket.** One WebSocket per agent, kept open, JSON messages: hello (agent id, version, OS, capabilities), heartbeats, metrics samples, "open stream" requests from the hub, configuration changes, update offers.
 - **Stream sockets.** One WebSocket per screen, terminal or file session, dialled by the agent when the hub asks, so a video frame never queues in front of a keystroke. The hub pairs it with the browser's socket and copies frames through unchanged.
 - **Screen stream.** Binary video frames in the format `/ws/video` uses today (frame number, keyframe flag, codec data), JSON for configuration, acknowledgements, input, pointer shape and clipboard. Acknowledgements keep driving `ratecontrol.js`'s logic, which moves into the agent.
 - **Terminal stream.** The current `/ws/term` messages, including flow control and pings.
-- **Authentication.** A join token minted in the hub UI (one use, expires in 15 minutes) is exchanged for a per-agent key pair; the hub stores the public key and the agent signs each connection. The agent's path into the hub (`/agent/*`) needs its own Access policy (service auth or bypass, decided in phase 1) because an agent cannot sign in as a person.
+- **Authentication.** A join token minted in the hub UI (one use, expires in 15 minutes) is exchanged for a per-agent key pair; the hub stores the public key and the agent signs each connection. The agent's path into the hub (`/agent/*`) gets its own Access application with a Bypass policy, since an agent cannot sign in as a person; the hub checks the agent's signature (decided in phase 1, decisions.md 2026-11-13).
 
 ## Fast screen path
 
@@ -102,7 +102,7 @@ Moves happen in their own commits with no behaviour change, so history stays rea
 | # | Phase | Done when | Status |
 | --- | --- | --- | --- |
 | 0 | **Bench.** One harness that records keystroke-to-pixel, capture-to-encode, frame delivery and bytes per minute on the separate desktop, at simulated links (loopback, 4 Mbit/s and 150 ms, 1 Mbit/s and 400 ms), and saves results under `bench/results/`. | Baseline for images, AV1 and H.264 saved. | done (2026-11-12, `bench/results/2026-11-12-baseline.json`) |
-| 1 | **Protocol and split.** Write `docs/protocol.md`. Move code into `hub/` and `web/`. The current host code talks to the hub over the protocol on loopback (a Node "agent shim"), so nothing visible changes. | Tests pass, bench unchanged within noise. | planned |
+| 1 | **Protocol and split.** Write `docs/protocol.md`. Move code into `hub/` and `web/`. The current host code talks to the hub over the protocol on loopback (a Node "agent shim"), so nothing visible changes. | Tests pass, bench unchanged within noise. | done (2026-11-13, `bench/results/2026-11-13-relay.json`; the relay is the default, `DESKPORT_RELAY=0` keeps the in-process path until the owner has run it) |
 | 2 | **Rust agent: metrics and terminal; join flow.** Agent binary with control socket, metrics and the tmux terminal; join tokens in the hub UI; install script that puts the binary and a systemd user unit in place. A second Linux machine joins. | A machine without a desktop shows in the hub with its terminal and metrics. | planned |
 | 3 | **Picker and dashboard.** Host list or grid, sorting, search, own order, status; dashboard per machine; per-host settings (`deskport.settings.<id>`) and the remembered host. | Usable on phone and desktop; checked in emulation, iPhone by the owner. | planned |
 | 4 | **Fast screen path in the agent.** Mutter RemoteDesktop and ScreenCast, encoders, pointer, clipboard, separate desktop scale, images fallback. Behind a setting until the bench shows it at least as good as the current path everywhere. | Default for the separate desktop; then My monitor after the owner tries it. guacd removed when nothing uses it. | planned |

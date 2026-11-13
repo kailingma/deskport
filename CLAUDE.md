@@ -1,12 +1,13 @@
 # Working on deskport
 
-Read [docs/architecture.md](docs/architecture.md) for how it fits together, [docs/decisions.md](docs/decisions.md) for why, [docs/multi-host.md](docs/multi-host.md) before touching hosts or paths, and [docs/roadmap.md](docs/roadmap.md) for the hub, agent and fast-path plan. DESIGN.md and PRODUCT.md govern the UI.
+Read [docs/architecture.md](docs/architecture.md) for how it fits together, [docs/decisions.md](docs/decisions.md) for why, [docs/multi-host.md](docs/multi-host.md) before touching hosts or paths, [docs/roadmap.md](docs/roadmap.md) for the hub, agent and fast-path plan, and [docs/protocol.md](docs/protocol.md) before changing anything between the hub and an agent (change that page first). DESIGN.md and PRODUCT.md govern the UI.
 
 ## Run, test, deploy
 
 - Node comes from fnm, and new shells may not have it on `PATH`. Prefix commands with `export PATH="$HOME/.local/share/fnm/aliases/default/bin:$PATH"`.
 - `npm test` runs the `node --test` suite. `npm run check` syntax-checks every file in `hub/`, `shim/`, `web/` and `bench/`, the shell and Python helpers.
 - Dev server: `.claude/launch.json` entry `deskport-dev` (port 7901, `--watch`, Access checks off), or `deskport-test` (port 7902, tmux session `deskport-test`, safe for terminal tests). The production server is `deskport.service` on 7900.
+- The server starts the agent shim (`shim/agent.js`) as a child process that does the host work; it exits when the server does, so stopping a test server by its PID stops both. `DESKPORT_RELAY=0` runs the host work in the server's own process.
 - Deploy: `systemctl --user restart deskport`. After changing a unit or `scripts/install-services.sh`, run that script instead; it also restarts the tunnel.
 - Do not restart or stop `deskport-session.service` (the separate desktop) without asking: apps the owner has open in it close. Changes to `scripts/desktop-session.sh` apply on its next start.
 - Commit and push to `main` when work is done (the owner has asked for that). Keep the repo machine-neutral: no hostnames, domains, emails or account IDs. Scan the staged diff for them before each commit.

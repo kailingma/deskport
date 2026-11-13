@@ -2,6 +2,39 @@
 
 Choices made while building deskport, newest first, with the reason for each. Entries marked *autonomous* were made while the owner was away and asked for choices to be made and logged.
 
+## 2026-11-13
+
+### Hub and agent protocol, and the relay on loopback (roadmap phase 1)
+The code is split into `hub/`, `shim/` and `web/`, and this machine's host work now reaches the browser through the protocol in [protocol.md](protocol.md): the hub starts the agent shim (`shim/agent.js`) as a child process, the shim dials the hub on loopback with signed upgrades, and the hub relays every screen, video and terminal socket unchanged. `DESKPORT_RELAY=0` keeps the in-process path for now.
+
+Bench, three runs each (`bench/results/2026-11-12-baseline.json`, commit cbd1f49, against `bench/results/2026-11-13-relay.json`, commit 6aa755b with the relay on). Medians:
+
+| Link | Case | Key to pixel | Overview press | Catch-up | Typing KB/min |
+| --- | --- | --- | --- | --- | --- |
+| loopback | images | 52 → 52 ms | 47 → 47 ms | 0 → 0 | 5,356 → 5,296 |
+| loopback | AV1 | 43 → 44 ms | 37 → 38 ms | 0 → 0 | 1,062 → 1,028 |
+| loopback | H.264 | 37 → 36 ms | 26 → 25 ms | 0 → 0 | 1,683 → 1,683 |
+| 4 Mbit/s, 150 ms | images | 202 → 201 ms | 220 → 233 ms | 2.2 → 2.7 s | 4,245 → 4,259 |
+| 4 Mbit/s, 150 ms | AV1 | 198 → 200 ms | 249 → 284 ms | 0 → 0 | 823 → 823 |
+| 4 Mbit/s, 150 ms | H.264 | 190 → 189 ms | 197 → 283 ms | 0 → 0 | 1,714 → 1,714 |
+| 1 Mbit/s, 400 ms | images | 458 → 457 ms | 1,105 → 1,107 ms | 42.4 → 45.0 s, guacd disconnects in both | 3,172 → 3,163 |
+| 1 Mbit/s, 400 ms | AV1 | 467 → 469 ms | 456 → 455 ms | 1.3 → 0.1 s | 549 → 563 |
+| 1 Mbit/s, 400 ms | H.264 | 459 → 465 ms | 439 → 438 ms | 0.1 → 0.1 s | 1,141 → 1,071 |
+
+Terminal echo 3, 151, 402 ms in both; Ctrl+C 58 → 59, 277 → 276, 530 → 525 ms. Capture to encode unchanged (8, 1 ms).
+
+Key to pixel, echo and Ctrl+C are within 6 ms everywhere. The overview press on 4 Mbit/s looked slower (AV1 249 → 284 ms, H.264 197 → 283 ms). H.264 alternates between about 190 and 280 ms per run in both sets. For AV1, a same-day check with the relay off and on (`2026-11-13-check-direct.json`, `2026-11-13-check-relay.json`, 4 Mbit/s AV1, three runs each) gave 267 ms without and 256 ms with the relay, and both showed the same two kinds of run: about 800 KB/min with a press near 190 ms, or about 6,000 KB/min near 270 ms. So the difference from the baseline is the separate desktop's state on the day (how much the overview draws), not the relay. The bench's overview workload is bimodal; read its press and motion columns across runs, not as one median.
+
+So the relay is the default. The in-process path stays behind `DESKPORT_RELAY=0` until the owner has run the relay in production (deskport.service, My monitor, the iPhone), and is removed in its own commit after that.
+
+Choices (*autonomous*):
+- **`shim/` for the Node agent shim**, a top-level directory beside `hub/`, since `agent/` is reserved for the Rust crate. The shim reads the same config as the hub (`hub/config.js`) and imports `hub/protocol.js`; both go when the Rust agent replaces it.
+- **Access for agents.** `/agent/*` gets its own path-scoped Cloudflare Access application with a Bypass policy, and the hub checks each agent's Ed25519 signature itself (protocol.md), instead of every agent holding a shared Access service token. A token leaked from one machine would open every agent path; a key is per machine and removable on its own. Nothing changes in Cloudflare yet: the local shim talks to the hub on loopback. The Bypass application is needed when the first other machine joins (phase 2).
+- **The local agent's key** is made at each hub start, kept only in memory, and handed to the shim in its environment, which the shim deletes before it starts tmux or anything else.
+- **`src/server.js` stays** as a one-line import of `hub/server.js`, because the installed `deskport.service` runs that path. `scripts/install-services.sh` now writes `hub/server.js`; rerunning it restarts the tunnel, so that is left to the owner.
+- **Protocol changes before the code:** file streams carry the browser's range headers and answer single ranges with 206 (Safari needs ranges for video); close codes a peer may send pass through, 1006 and other codes become 1011; no compression between hub and agent on loopback; the hub answers `/api/host` itself.
+- **No flow control in the relay.** The hub copies messages as they come, and what the browser's socket has not sent waits in the hub. `pacing.js` still sees only the first local hop's `bufferedAmount`, as before the relay, when that hop was cloudflared.
+
 ## 2026-11-12
 
 ### Bench and baseline (roadmap phase 0)

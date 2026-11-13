@@ -20,9 +20,9 @@ import { generateAgentKey, KINDS } from './protocol.js';
 // Requests may be addressed to this host directly (/api/..., /ws/...) or by id
 // (/h/<id>/api/..., /h/<id>/ws/...); ids of other hosts get 501 for now.
 //
-// This machine's host work (shim/host.js) runs in this process, or with
-// DESKPORT_RELAY=1 in the agent shim (shim/agent.js), a child process that
-// speaks docs/protocol.md to this hub on loopback.
+// This machine's host work (shim/host.js) runs in the agent shim
+// (shim/agent.js), a child process that speaks docs/protocol.md to this hub on
+// loopback, or with DESKPORT_RELAY=0 in this process.
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { version } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -41,7 +41,7 @@ const hosts = createHostRegistry({ config, sources: SCREEN_SOURCES, version, log
 const agents = createAgentHub({ log, version });
 const selfId = hosts.self.id;
 const local = config.relay ? null : createLocalHost({ config, root, log });
-if (config.relay) log('DESKPORT_RELAY=1: host work runs in the agent shim');
+if (!config.relay) log('DESKPORT_RELAY=0: host work runs in this process');
 
 // The machine's API and streams, in this process or through its agent.
 const FILE_HEADERS = ['range', 'if-none-match', 'if-modified-since'];
