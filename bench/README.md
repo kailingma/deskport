@@ -10,6 +10,8 @@ node bench/run.mjs [--label name] [--runs n] [--links loopback,4m,1m]
 node bench/compare.mjs bench/results/<before>.json bench/results/<after>.json
 ```
 
+`--query path=direct` measures the direct screen path (architecture.md) for the video cases.
+
 ## Links
 
 `lib/link.mjs` is a TCP proxy between the bench's client and the server. It delays each direction by half the round trip, limits each direction to the link's rate (one limit shared by all of a case's sockets), and buffers without limit, as Cloudflare's edge does.

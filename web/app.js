@@ -255,7 +255,7 @@ const SPEED_HELP = {
   av1: ['About 13 ms to encode a frame.', 'About 15 ms to encode a frame, searching longer for a smaller encoding.', 'About 19 ms to encode a frame, the encoder\'s most thorough setting here.'],
   h264: ['About 2 ms to encode a frame.', 'About 3 ms to encode a frame, searching longer for a smaller encoding.', 'About 5 ms to encode a frame, the encoder\'s most thorough setting here.'],
 };
-const SCREEN_SETTINGS = ['source', 'resolution', 'quality', 'priority', 'matchMonitor', 'monitor', 'encoding', 'encSpeed', 'bitrate'];
+const SCREEN_SETTINGS = ['source', 'resolution', 'quality', 'priority', 'matchMonitor', 'monitor', 'encoding', 'encSpeed', 'bitrate', 'direct'];
 let decodes = null;
 screen.videoSupport().then((s) => {
   decodes = s;
@@ -337,6 +337,11 @@ function syncSettingsForm() {
     $('bitrate-help').textContent = bitrateHelp(settings.get('bitrate'), settings.get('priority'));
     $('video-stats').textContent = videoStatsLine();
     $('video-stats').hidden = !$('video-stats').textContent;
+    $('direct-rows').hidden = source !== 'session';
+    $('set-direct').checked = settings.get('direct');
+    $('direct-help').textContent = settings.get('direct')
+      ? 'Keys and the pointer go straight to the separate desktop, and its picture is recorded without Remote Desktop. It starts in about half a second. Not yet: the clipboard, and the pointer is part of the video, so it moves with the picture.'
+      : 'Off: the separate desktop is reached through Remote Desktop, like your monitor.';
   }
   $('set-quality').value = String(QUALITY.indexOf(settings.get('quality')));
   $('quality-help').textContent = (isVideo ? VIDEO_QUALITY_HELP : QUALITY_HELP)[settings.get('quality')];
@@ -391,6 +396,7 @@ settingsDialog.addEventListener('input', async (e) => {
   else if (t.id === 'set-enc-speed') settings.set('encSpeed', Number(t.value));
   else if (t.id === 'set-term-size') settings.set('termFontSize', Number(t.value));
   else if (t.id === 'set-blink') settings.set('cursorBlink', t.checked);
+  else if (t.id === 'set-direct') settings.set('direct', t.checked);
   else if (t.dataset.setting) settings.set(t.dataset.setting, t.value);
   syncSettingsForm();
   if (t.id === 'set-source') refreshSession();

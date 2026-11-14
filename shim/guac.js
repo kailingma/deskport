@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { createScaler } from './scaler.js';
 import { createAckAhead, lastSyncTimestamp } from './pacing.js';
 import { createDrawFilter, createVideoSource, ENCODINGS, BITRATES } from './video.js';
+import { handleDirect } from './direct.js';
 
 // Guacamole protocol: each element is "<length>.<value>", elements are
 // separated by "," and an instruction ends with ";". Lengths count Unicode
@@ -246,6 +247,11 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
   // guacd turns the browser's device pixels into a desktop size using its "dpi"
   // argument. An extra monitor is always made at CSS-pixel size (scale 1 on the
   // main desktop is never changed); the separate desktop follows sessionLayout().
+  // The direct path (shim/direct.js): no guacd or RDP, for the separate
+  // desktop with a video encoding. Other sources and images use guacd.
+  if (q.get('path') === 'direct' && source === 'session' && videoMode) {
+    return handleDirect(ws, { width, height, dpi, encoding, speed, quality, priority, bitrate, session, video, log });
+  }
   const layout = source === 'session' ? sessionLayout(width, height, dpi)
     : source === 'virtual' ? { scale: 1, width, height, dpi: 96 }
     : null;

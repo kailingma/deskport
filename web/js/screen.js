@@ -439,6 +439,7 @@ export function createScreen({ host, setStatus, toast }) {
       res: settings.get('resolution'),
       source: settings.get('source'),
       ...(encoding !== 'images' ? { encoding, speed: String(settings.get('encSpeed')), bitrate: settings.get('bitrate') } : {}),
+      ...(encoding !== 'images' && settings.get('source') === 'session' && settings.get('direct') ? { path: 'direct' } : {}),
       ...(matched ? { match: '1' } : {}),
       ...(settings.get('monitor') !== 'primary' ? { monitor: settings.get('monitor') } : {}),
     });

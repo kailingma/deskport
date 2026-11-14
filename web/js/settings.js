@@ -14,6 +14,7 @@ export const DEFAULTS = {
   encoding: 'images', // images: guacd's pictures | av1 | h264: a video stream (shim/video.js)
   encSpeed: 0, // video encoder speed: 0 fastest | 1 balanced | 2 smallest
   bitrate: 'auto', // video: auto adapts to the connection, or a fixed kbit/s
+  direct: false, // separate desktop with video: input and picture straight through Mutter, without RDP and guacd (shim/direct.js)
   touchScroll: 'natural', // natural | reversed
   termTheme: 'deskport-dark',
   termFont: 'system',
@@ -45,7 +46,7 @@ const listeners = new Set();
 // Picture and source settings belong to the machine being shown. The hub's
 // own machine keeps them in KEY with everything else (as before machines
 // existed); another machine in KEY.<id>.
-export const HOST_KEYS = ['source', 'resolution', 'quality', 'priority', 'matchMonitor', 'monitor', 'encoding', 'encSpeed', 'bitrate'];
+export const HOST_KEYS = ['source', 'resolution', 'quality', 'priority', 'matchMonitor', 'monitor', 'encoding', 'encSpeed', 'bitrate', 'direct'];
 let hostKey = null; // null: the hub's own machine
 let hostValues = null;
 

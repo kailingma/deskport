@@ -80,8 +80,12 @@ export function createDrawFilter() {
  * @param {string} opts.quality
  * @param {'speed'|'data'} opts.priority
  * @param {string} opts.bitrate  'auto' or kbit/s
+ * @param {boolean} [opts.direct]  record a new virtual monitor through a
+ *   RemoteDesktop session and take input for it (the separate desktop only)
+ * @param {(msg: object) => void} [opts.onMessage]  the encoder's JSON messages,
+ *   such as {type: "clipboard", text} in direct mode
  */
-export function createVideoSource({ bus, monitor, codec, speed, quality, priority, bitrate, log }) {
+export function createVideoSource({ bus, monitor, codec, speed, quality, priority, bitrate, direct = false, onMessage, log }) {
   const ceiling = (CEILING[quality] ?? CEILING.high) / (priority === 'data' ? 2 : 1);
   let ws = null;
   let size = null; // { width, height, desktop: [w, h] }
@@ -95,6 +99,7 @@ export function createVideoSource({ bus, monitor, codec, speed, quality, priorit
   let tick = null;
   let frames = 0;
   let encodeMs = [];
+  let command = () => {};
 
   const isOpen = () => ws !== null && ws.readyState === ws.OPEN;
   const send = (obj) => { if (isOpen()) ws.send(JSON.stringify(obj)); };
@@ -121,14 +126,14 @@ export function createVideoSource({ bus, monitor, codec, speed, quality, priorit
     rc = createRateControl({ bitrate, priority, ceiling });
     const now = performance.now();
     const kbps = rc.step(now);
-    const cfg = { bus, monitor, match: size.desktop, width, height, codec, speed, quality, kbps, fps: FPS[priority] };
-    log(`video: ${codec} ${width}x${height} from ${monitor} (speed ${speed}, ${quality}, ${priority}, bitrate ${bitrate})`);
+    const cfg = { bus, monitor, match: size.desktop, width, height, codec, speed, quality, kbps, fps: FPS[priority], direct };
+    log(`video: ${codec} ${width}x${height} from ${direct ? 'a direct session' : monitor} (speed ${speed}, ${quality}, ${priority}, bitrate ${bitrate})`);
     const c = spawn('python3', [script, JSON.stringify(cfg)], { stdio: ['pipe', 'pipe', 'pipe'] });
     child = c;
     running = `${width}x${height}`;
     let open = true;
     let sentKbps = kbps;
-    const command = (obj) => { if (child === c && c.stdin.writable) c.stdin.write(`${JSON.stringify(obj)}\n`); };
+    command = (obj) => { if (child === c && c.stdin.writable) c.stdin.write(`${JSON.stringify(obj)}\n`); };
     send({ type: 'config', codec: codecString(codec, width, height), width, height });
 
     let buf = Buffer.alloc(0);
@@ -148,6 +153,7 @@ export function createVideoSource({ bus, monitor, codec, speed, quality, priorit
           const msg = JSON.parse(payload.toString());
           // Reported only if the encoder is not restarted (see the exit handler).
           if (msg.type === 'error') lastError = msg.message;
+          onMessage?.(msg);
           continue;
         }
         if (!isOpen()) continue;
@@ -215,6 +221,9 @@ export function createVideoSource({ bus, monitor, codec, speed, quality, priorit
       restarts = 0;
       restartTimer = setTimeout(start, running ? 300 : 0);
     },
+
+    /** Direct mode: input for the desktop ({k}, {p}, {b} or {a}, see video-encoder.py). */
+    input(obj) { command(obj); },
 
     attach(socket) {
       if (ws) return socket.close(1008, 'already attached');

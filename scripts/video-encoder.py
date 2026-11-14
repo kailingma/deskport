@@ -19,6 +19,16 @@ Commands on stdin, one JSON object per line:
                    waits and is encoded as soon as it opens
   {"fps": n}       change the frame rate cap
   {"key": true}    make the next frame a keyframe
+With "direct": true in the config, the encoder records a new virtual monitor
+of width x height through a RemoteDesktop session instead of an existing
+monitor, draws the pointer into the picture, and takes input on stdin too:
+  {"k": [keysym, pressed]}   a key
+  {"p": [x, y]}              pointer position in the picture's pixels
+  {"b": [button, pressed]}   a pointer button (Linux evdev code, BTN_LEFT 272)
+  {"a": [axis, steps]}       scroll: axis 0 vertical, 1 horizontal
+  {"clip": text}             make text the desktop's clipboard
+and reports text copied on the desktop as the message {"type": "clipboard", "text"}.
+Only for the separate desktop (its own bus): input reaches that desktop.
 
 Output on stdout, records of a 16-byte header and a payload:
   u32 payload length, u8 kind (0 frame, 1 JSON message), u8 keyframe,
@@ -43,6 +53,7 @@ from gi.repository import Gio, GLib, Gst, GstVideo  # noqa: E402
 
 STATE = "(ua((ssss)a(siiddada{sv})a{sv})a(iiduba(ssss)a{sv})a{sv})"
 CURSOR_HIDDEN = 0
+CURSOR_EMBEDDED = 1
 
 # Speed 0 is the fastest. libaom realtime cpu-used: at 1920 x 1080 these took a
 # median 13, 15 and 19 ms per frame here, at 3840 x 2160 39, 42 and 56 ms.
@@ -136,6 +147,117 @@ def start_recording(bus, connector, loop):
     return node["id"]
 
 
+def start_direct(bus, loop):
+    """A RemoteDesktop session with a linked virtual monitor. Returns (node, session, stream)."""
+    def call(dest, path, iface, method, args, reply):
+        return bus.call_sync(dest, path, iface, method, args,
+                             GLib.VariantType(reply) if reply else None, Gio.DBusCallFlags.NONE, 5000, None)
+
+    rd = call("org.gnome.Mutter.RemoteDesktop", "/org/gnome/Mutter/RemoteDesktop", "org.gnome.Mutter.RemoteDesktop",
+              "CreateSession", None, "(o)")[0]
+    sid = call("org.gnome.Mutter.RemoteDesktop", rd, "org.freedesktop.DBus.Properties", "Get",
+               GLib.Variant("(ss)", ("org.gnome.Mutter.RemoteDesktop.Session", "SessionId")), "(v)")[0]
+    sc = call("org.gnome.Mutter.ScreenCast", "/org/gnome/Mutter/ScreenCast", "org.gnome.Mutter.ScreenCast",
+              "CreateSession", GLib.Variant("(a{sv})", ({"remote-desktop-session-id": GLib.Variant("s", sid)},)), "(o)")[0]
+    stream = call("org.gnome.Mutter.ScreenCast", sc, "org.gnome.Mutter.ScreenCast.Session", "RecordVirtual",
+                  GLib.Variant("(a{sv})", ({"cursor-mode": GLib.Variant("u", CURSOR_EMBEDDED),
+                                           "is-platform": GLib.Variant("b", True)},)), "(o)")[0]
+    node = {}
+
+    def added(_conn, _sender, _path, _iface, _signal, params):
+        node["id"] = params[0]
+        loop.quit()
+
+    bus.signal_subscribe(None, "org.gnome.Mutter.ScreenCast.Stream", "PipeWireStreamAdded", stream, None,
+                         Gio.DBusSignalFlags.NONE, added)
+    bus.signal_subscribe(None, "org.gnome.Mutter.RemoteDesktop.Session", "Closed", rd, None,
+                         Gio.DBusSignalFlags.NONE, lambda *a: fail(3, "the remote desktop session ended"))
+    call("org.gnome.Mutter.RemoteDesktop", rd, "org.gnome.Mutter.RemoteDesktop.Session", "Start", None, None)
+    try:
+        call("org.gnome.Mutter.RemoteDesktop", rd, "org.gnome.Mutter.RemoteDesktop.Session", "EnableClipboard",
+             GLib.Variant("(a{sv})", ({},)), None)
+    except GLib.Error as err:
+        sys.stderr.write(f"video-encoder: no clipboard: {err.message}\n")
+    timeout = GLib.timeout_add(5000, lambda: fail(3, "the virtual monitor did not start"))
+    loop.run()
+    GLib.source_remove(timeout)
+    return node["id"], rd, stream
+
+
+TEXT_TYPES = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT"]
+CLIP_MAX = 1 << 20
+
+
+def watch_clipboard(bus, rd):
+    """The desktop's clipboard both ways. Returns set_text(text) for the browser's clipboard."""
+    session = "org.gnome.Mutter.RemoteDesktop.Session"
+    offered = {"text": None}
+
+    def write_file(fd, data):
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+
+    def on_transfer(_conn, _sender, _path, _iface, _signal, params):
+        _mime, serial = params.unpack()
+        ok = False
+        try:
+            res, fds = bus.call_with_unix_fd_list_sync("org.gnome.Mutter.RemoteDesktop", rd, session, "SelectionWrite",
+                                                       GLib.Variant("(u)", (serial,)), GLib.VariantType("(h)"),
+                                                       Gio.DBusCallFlags.NONE, 5000, None, None)
+            write_file(fds.get(res.unpack()[0]), (offered["text"] or "").encode())
+            ok = True
+        except (GLib.Error, OSError) as err:
+            sys.stderr.write(f"video-encoder: clipboard write: {err}\n")
+        bus.call("org.gnome.Mutter.RemoteDesktop", rd, session, "SelectionWriteDone", GLib.Variant("(ub)", (serial, ok)),
+                 None, Gio.DBusCallFlags.NONE, -1, None, None, None)
+
+    def read_text(mime):
+        try:
+            res, fds = bus.call_with_unix_fd_list_sync("org.gnome.Mutter.RemoteDesktop", rd, session, "SelectionRead",
+                                                       GLib.Variant("(s)", (mime,)), GLib.VariantType("(h)"),
+                                                       Gio.DBusCallFlags.NONE, 5000, None, None)
+            fd = fds.get(res.unpack()[0])
+        except GLib.Error as err:
+            sys.stderr.write(f"video-encoder: clipboard read: {err.message}\n")
+            return
+
+        def drain():
+            data = b""
+            with os.fdopen(fd, "rb") as f:
+                while len(data) <= CLIP_MAX:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+            if len(data) <= CLIP_MAX:
+                message(type="clipboard", text=data.decode("utf-8", "replace"))
+        threading.Thread(target=drain, daemon=True).start()
+
+    def on_owner(_conn, _sender, _path, _iface, _signal, params):
+        options = params.unpack()[0]
+        if options.get("session-is-owner"):
+            return
+        types = options.get("mime-types") or []
+        # Mutter sends the list as a one-element tuple, (as).
+        if isinstance(types, tuple) and len(types) == 1 and isinstance(types[0], list):
+            types = types[0]
+        mime = next((t for t in TEXT_TYPES if t in types), None)
+        if mime:
+            # Read right in the signal, the new owner's data is not there yet
+            # and the read returns nothing (an entry in GNOME Shell, here).
+            GLib.timeout_add(100, lambda: read_text(mime) and False)
+
+    bus.signal_subscribe(None, session, "SelectionTransfer", rd, None, Gio.DBusSignalFlags.NONE, on_transfer)
+    bus.signal_subscribe(None, session, "SelectionOwnerChanged", rd, None, Gio.DBusSignalFlags.NONE, on_owner)
+
+    def set_text(text):
+        offered["text"] = str(text)[:CLIP_MAX]
+        bus.call("org.gnome.Mutter.RemoteDesktop", rd, session, "SetSelection",
+                 GLib.Variant("(a{sv})", ({"mime-types": GLib.Variant("as", TEXT_TYPES)},)),
+                 None, Gio.DBusCallFlags.NONE, -1, None, None, None)
+    return set_text
+
+
 def encoder_description(cfg):
     w, h = cfg["width"], cfg["height"]
     speed = max(0, min(2, int(cfg.get("speed", 0))))
@@ -169,16 +291,24 @@ def main():
 
     Gst.init(None)
     loop = GLib.MainLoop()
+    direct = None
     try:
         bus = connect(cfg["bus"])
-        connector = pick_monitor(bus, cfg.get("monitor", "primary"), cfg.get("match"))
-        node = start_recording(bus, connector, loop)
+        if cfg.get("direct"):
+            node, rd, rd_stream = start_direct(bus, loop)
+            connector = "direct"
+            direct = (rd, rd_stream)
+        else:
+            connector = pick_monitor(bus, cfg.get("monitor", "primary"), cfg.get("match"))
+            node = start_recording(bus, connector, loop)
     except GLib.Error as err:
         fail(3, f"could not record the monitor: {err.message}")
 
     fmt, encoder = encoder_description(cfg)
+    # A virtual monitor takes the size the consumer asks for.
+    source_caps = f"! video/x-raw,width={w},height={h} " if direct else ""
     capture = Gst.parse_launch(
-        f"pipewiresrc path={node} do-timestamp=true ! videoscale n-threads=4 add-borders=false "
+        f"pipewiresrc path={node} do-timestamp=true {source_caps}! videoscale n-threads=4 add-borders=false "
         f"! videoconvert n-threads=4 ! video/x-raw,format={fmt},width={w},height={h},pixel-aspect-ratio=1/1 "
         "! appsink name=raw max-buffers=1 drop=true sync=false emit-signals=true")
     fps = [max(1, int(cfg.get("fps", 30)))]
@@ -268,11 +398,37 @@ def main():
         b.add_signal_watch()
         b.connect("message::error", on_error)
 
+    set_clipboard = watch_clipboard(bus, direct[0]) if direct else None
+
+    def notify(method, signature, args):
+        # Input does not wait for Mutter's reply.
+        bus.call("org.gnome.Mutter.RemoteDesktop", direct[0], "org.gnome.Mutter.RemoteDesktop.Session", method,
+                 GLib.Variant(signature, args), None, Gio.DBusCallFlags.NONE, -1, None, None, None)
+
     def on_command(line):
         try:
             cmd = json.loads(line)
         except ValueError:
             return
+        if direct:
+            try:
+                if "k" in cmd:
+                    notify("NotifyKeyboardKeysym", "(ub)", (int(cmd["k"][0]), bool(cmd["k"][1])))
+                    return
+                if "p" in cmd:
+                    notify("NotifyPointerMotionAbsolute", "(sdd)", (direct[1], float(cmd["p"][0]), float(cmd["p"][1])))
+                    return
+                if "b" in cmd:
+                    notify("NotifyPointerButton", "(ib)", (int(cmd["b"][0]), bool(cmd["b"][1])))
+                    return
+                if "a" in cmd:
+                    notify("NotifyPointerAxisDiscrete", "(ui)", (int(cmd["a"][0]), int(cmd["a"][1])))
+                    return
+                if "clip" in cmd:
+                    set_clipboard(cmd["clip"])
+                    return
+            except (TypeError, ValueError, IndexError):
+                return
         if "kbps" in cmd:
             kbps = max(50, int(cmd["kbps"]))
             if cfg["codec"] == "h264":

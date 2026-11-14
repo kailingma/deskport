@@ -4,6 +4,32 @@ Choices made while building deskport, newest first, with the reason for each. En
 
 ## 2026-11-13
 
+### Direct screen path for the separate desktop, behind a setting (roadmap phase 4, first step)
+Checked first, as the roadmap asked: GNOME Shell 50.1's RemoteDesktop session (version 1) on the separate desktop's bus has keysym and keycode input, absolute and relative pointer, buttons, axis (also discrete), touch, `EnableClipboard` with `SetSelection`, `SelectionWrite` and `SelectionRead`, `ConnectToEIS` and `SetKeymap`; ScreenCast (version 4) has `RecordVirtual`. Nothing the roadmap assumed is missing.
+
+With Settings, Screen, Direct connection (separate desktop and a video encoding only, off by default), the shim skips guacd and RDP: `scripts/video-encoder.py` creates a RemoteDesktop session with a linked virtual monitor at the browser's size and takes keys, pointer, buttons, scroll and clipboard on stdin; `shim/direct.js` speaks the few Guacamole instructions the page uses, so the page and its touch gestures are unchanged. Clipboard both ways checked: text sent from the page pasted on the desktop (`wl-paste`), and text copied from GNOME Shell's search field arrived in the page. Read in the owner-changed signal itself, the selection came back empty; reading 100 ms later works.
+
+Bench, three runs (`bench/results/2026-11-13-direct.json`, `--query path=direct`, against the baseline). Medians:
+
+| Link | Case | Key to pixel (p90) | Overview press | Catch-up | Overview fps | Overview KB/min | Typing KB/min | First picture |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| loopback | AV1 | 43 (57) → 38 (50) ms | 37 → 23 ms | 0 → 0 | 5.1 → 17.4 | 6,673 → 11,627 | 1,062 → 1,188 | 2.2 → 0.35 s |
+| loopback | H.264 | 37 (41) → 33 (36) ms | 26 → 21 ms | 0 → 0 | 4.4 → 17.1 | 1,255 → 22,898 | 1,683 → 1,968 | 2.3 → 0.47 s |
+| 4 Mbit/s | AV1 | 198 (206) → 192 (194) ms | 249 → 177 ms | 0 → 69 ms | 5.2 → 17.5 | 5,014 → 11,320 | 823 → 962 | 2.6 → 0.87 s |
+| 4 Mbit/s | H.264 | 190 (215) → 186 (525) ms | 197 → 176 ms | 0 → 17 ms | 4.3 → 16.1 | 2,486 → 10,629 | 1,714 → 2,110 | 2.6 → 0.93 s |
+| 1 Mbit/s | AV1 | 467 (509) → 461 (467) ms | 456 → 439 ms | 1.3 → 1.2 s | 4.6 → 13.4 | 520 → 5,639 | 549 → 639 | 3.5 → 2.1 s |
+| 1 Mbit/s | H.264 | 459 (935) → 458 (769) ms | 439 → 439 ms | 0.1 → 0.3 s | 4.3 → 14.4 | 588 → 4,218 | 1,141 → 964 | 3.4 → 2.0 s |
+
+Keystrokes are 4 to 6 ms faster at the median, large changes up to 72 ms faster, and the picture starts two to six times sooner. The direct path also shows what the RDP path skipped: GNOME's overview animation at 13 to 17 frames a second instead of 4 to 5, which costs two to eighteen times the data during large changes and a little catch-up on slow links. On 4 Mbit/s with H.264, two of three runs had their slowest tenth of keys at about 525 ms (one round trip plus 340 ms), against 215 ms before.
+
+So it stays off by default: it is not at least as good everywhere (data during motion, the H.264 tail at 4 Mbit/s). Next for it: cap the frame rate during large changes by the link (the rate control already sees the queue), find what delays those H.264 keys (a frame queued in front of them is the likely cause), a pointer drawn by the browser from cursor metadata, and touch events.
+
+Choices (*autonomous*):
+- **The direct path lives in the shim and the Python encoder helper**, reusing the GStreamer pipeline that already records ScreenCast for the video encodings, not yet in the Rust agent. The bench decides first whether the path is worth it; the Rust agent can take it over once it is.
+- **The bridge emulates the Guacamole instructions the page uses** instead of a new page client, so `screen.js`, its scaling, zoom and touch gestures (which the owner wants kept) stay as they are.
+- **The pointer is drawn into the video** (`cursor-mode` embedded) for now; it moves with the picture, not at input speed.
+- **Only the separate desktop.** A RemoteDesktop session on the main desktop injects real input into the owner's screen; the direct path never opens one there.
+
 ### Machines view and dashboard (roadmap phase 3)
 A third view, Machines (Alt+3, and a fourth tab on phones), lists every machine with status, processor and memory, as a list or a grid, with search, sort and the person's own order. Choosing Screen or Terminal on a machine points both views at it; a dashboard per machine shows processor (each core too), memory, pressure, network, disks, storage, graphics, temperatures and the busiest processes, with ten-minute sparklines, sampling every second while it is open. Add machine mints a token and shows the install command. This machine's own metrics come from the shim (`shim/metrics.js`).
 
