@@ -3,11 +3,12 @@ import { TERMINAL_THEMES, TERMINAL_FONTS } from './js/themes.js';
 import { toggleMod } from './js/keys.js';
 import { createScreen } from './js/screen.js';
 import { createTerminal } from './js/terminal.js';
-import { localHost } from './js/host.js';
+import { localHost, hub } from './js/host.js';
+import { createMachines } from './js/machines.js';
 import { ask } from './js/dialog.js';
 
 const $ = (id) => document.getElementById(id);
-// One host for now: the server that served this page (docs/multi-host.md).
+// The machine the Screen and Terminal views show; the Machines view switches it.
 const host = localHost;
 const canFullscreen = Boolean(document.fullscreenEnabled);
 const coarse = matchMedia('(pointer: coarse)');
@@ -20,7 +21,7 @@ document.documentElement.classList.toggle('can-install', !canFullscreen && !stan
 // ---------- status, toast ----------
 
 const statusEl = $('status');
-const status = { screen: ['idle', 'Idle'], term: ['idle', 'Idle'] };
+const status = { screen: ['idle', 'Idle'], term: ['idle', 'Idle'], machines: ['idle', 'Idle'] };
 let view = 'screen';
 
 function setStatus(which, state, text) {
@@ -60,14 +61,69 @@ function toast(text, { action, ms } = {}) {
 }
 
 let me = null;
-host.json('/api/me').then((data) => {
+// The machine being shown: { id, name, local, screen, terminal }, the hub's own until the list says otherwise.
+let machine = { id: 'local', name: '', local: true, screen: true, terminal: true };
+
+function showMachineName() {
+  const name = machine.local ? me?.host ?? '' : machine.name;
+  $('host').textContent = machine.local && me?.dev ? `${name} (dev)` : name;
+  if (name) document.title = `${name} · deskport`;
+  $('no-screen-title').textContent = `${machine.name || 'This machine'} has no screen`;
+}
+
+hub.json('/api/me').then((data) => {
   me = data;
-  $('host').textContent = me.dev ? `${me.host} (dev)` : me.host;
-  document.title = `${me.host} · deskport`;
+  showMachineName();
 }).catch(() => {});
 
 const screen = createScreen({ host, setStatus, toast });
 const term = createTerminal({ host, setStatus, toast });
+
+/** Points Screen and Terminal at another machine, reconnecting what was connected. */
+function useMachine(m, { quiet = false } = {}) {
+  const same = m.id === machine.id || (m.local && machine.local);
+  machine = { id: m.local ? 'local' : m.id, name: m.name, local: Boolean(m.local), screen: Boolean(m.screen), terminal: m.terminal !== false };
+  try { localStorage.setItem('deskport.host', machine.local ? 'local' : machine.id); } catch {}
+  showMachineName();
+  document.body.classList.toggle('no-screen', !machine.screen);
+  $('no-screen').hidden = machine.screen;
+  if (same) return;
+  host.use(machine.id);
+  settings.useHost(m.id, machine.local);
+  syncSource();
+  if (machine.screen) {
+    if (view === 'screen') screen.reconnect();
+    else screen.markStale();
+  } else {
+    screen.stop();
+  }
+  term.switchHost();
+  if (!quiet) toast(`Showing ${m.name}`);
+}
+
+const machines = createMachines({
+  toast,
+  currentId: () => machine.id,
+  open(m, which) {
+    useMachine(m);
+    showView(which === 'screen' && !m.screen ? 'term' : which);
+  },
+  onList(list, err) {
+    if (err) setStatus('machines', 'bad', 'Hub unreachable');
+    else {
+      const online = list.filter((m) => m.status === 'online').length;
+      setStatus('machines', 'ok', `${online} of ${list.length} online`);
+    }
+    // The shown machine was removed: back to the hub's own.
+    if (!err && !machine.local && !list.some((m) => m.id === machine.id)) {
+      const self = list.find((m) => m.local);
+      if (self) useMachine(self);
+    } else if (!err) {
+      const cur = list.find((m) => (machine.local ? m.local : m.id === machine.id));
+      if (cur && (cur.name !== machine.name || cur.screen !== machine.screen)) useMachine(cur, { quiet: true });
+    }
+  },
+});
 
 // ---------- views ----------
 
@@ -79,10 +135,18 @@ function showView(next) {
   }
   $('view-screen').hidden = next !== 'screen';
   $('view-term').hidden = next !== 'term';
+  $('view-machines').hidden = next !== 'machines';
   setStatus(next, ...status[next]);
   try { localStorage.setItem('deskport.view', next); } catch {}
 
+  if (next === 'machines') {
+    screen.releaseKeys();
+    machines.show();
+    return;
+  }
+  machines.hide();
   if (next === 'screen') {
+    if (!machine.screen) return;
     screen.ensureConnected();
     if (!coarse.matches) screen.focus();
   } else {
@@ -96,12 +160,13 @@ for (const tab of document.querySelectorAll('button[data-view]')) {
   tab.addEventListener('click', () => showView(tab.dataset.view));
 }
 
-// Alt+1 / Alt+2 switch views without reaching the remote desktop or shell.
+// Alt+1, Alt+2 and Alt+3 switch views without reaching the remote desktop or shell.
 window.addEventListener('keydown', (e) => {
-  if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === '1' || e.key === '2')) {
+  const next = { 1: 'screen', 2: 'term', 3: 'machines' }[e.key];
+  if (e.altKey && !e.ctrlKey && !e.metaKey && next) {
     e.preventDefault();
     e.stopImmediatePropagation();
-    showView(e.key === '1' ? 'screen' : 'term');
+    showView(next);
   }
 }, true);
 
@@ -495,7 +560,7 @@ const actions = {
   super: () => screen.superKey(),
   cad: () => screen.ctrlAltDel(),
   fullscreen: toggleFullscreen,
-  reconnect: () => (view === 'screen' ? screen.reconnect() : term.reconnect()),
+  reconnect: () => (view === 'screen' ? machine.screen && screen.reconnect() : view === 'term' ? term.reconnect() : machines.refresh()),
   keyboard: () => (view === 'screen' ? screen.showKeyboard() : term.focus()),
   sheet: () => { screen.cancelGesture(); sheet.showModal(); },
   'close-sheet': () => sheet.close(),
@@ -546,6 +611,21 @@ syncViewport();
 
 // ---------- start ----------
 
+// The last view and machine on this device. Until the list arrives, the view
+// waits, so it does not connect to the hub's own machine first.
 let initial = 'screen';
-try { initial = localStorage.getItem('deskport.view') === 'term' ? 'term' : 'screen'; } catch {}
-showView(initial);
+let savedHost = 'local';
+try {
+  const v = localStorage.getItem('deskport.view');
+  initial = v === 'term' || v === 'machines' ? v : 'screen';
+  savedHost = localStorage.getItem('deskport.host') || 'local';
+} catch {}
+if (savedHost === 'local' || initial === 'machines') {
+  showView(initial);
+  if (savedHost !== 'local') hub.json('/api/hosts').then((list) => { const m = list.find((x) => x.id === savedHost && !x.local); if (m) useMachine(m, { quiet: true }); }).catch(() => {});
+} else {
+  hub.json('/api/hosts').then((list) => {
+    const m = list.find((x) => x.id === savedHost && !x.local) || list.find((x) => x.local);
+    if (m) useMachine(m, { quiet: true });
+  }).catch(() => {}).finally(() => showView(initial));
+}

@@ -550,6 +550,8 @@ export function createScreen({ host, setStatus, toast }) {
   return {
     ensureConnected() { if (!client || stale) connect(); },
     markStale() { stale = true; imagesInstead = false; },
+    /** Closes the connection, for a machine that has no screen. */
+    stop() { disconnect(); stale = true; setStatus('screen', 'idle', 'No screen'); },
     reconnect() { drops = 0; imagesInstead = false; connect(); },
     focus() { wrap.focus({ preventScroll: true }); },
     releaseKeys() { keyboard?.reset(); },

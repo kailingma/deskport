@@ -7,6 +7,7 @@ import { config } from '../hub/config.js';
 import { SUBPROTOCOL, AGENT_PREFIX, signUpgrade } from '../hub/protocol.js';
 import { createLocalHost } from './host.js';
 import { serveFileStream } from './files.js';
+import { createCollector } from './metrics.js';
 
 // The agent shim: this machine's host code (shim/host.js) speaking the hub
 // and agent protocol (docs/protocol.md) to a hub on loopback. The hub starts
@@ -34,6 +35,7 @@ const STEADY_MS = 60_000;
 const KINDS = new Set(['screen', 'video', 'term', 'file']);
 
 const host = createLocalHost({ config, root, log });
+const collector = createCollector();
 
 function dial(pathAndQuery) {
   return new WebSocket(new URL(pathAndQuery, hub), SUBPROTOCOL, {
@@ -72,12 +74,23 @@ function connect() {
   let connectedAt = 0;
   let lastSeen = Date.now();
   const watchdog = setInterval(() => { if (Date.now() - lastSeen > SILENCE_MS) ws.terminate(); }, 5000);
+  let metricsTimer = null;
+  const sampleEvery = (ms) => {
+    clearInterval(metricsTimer);
+    const every = Math.min(600_000, Math.max(500, Number(ms) || 15000));
+    const send = async () => {
+      const sample = await collector.sample();
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'metrics', t: Date.now(), sample }));
+    };
+    send();
+    metricsTimer = setInterval(send, every);
+  };
   ws.on('open', () => {
     connectedAt = Date.now();
     ws.send(JSON.stringify({
       type: 'hello',
       agent: { version, os: process.platform, arch: os.arch(), name: config.self.name },
-      capabilities: { screen: { sources: ['mirror', 'virtual', 'session'], encodings: ['images', 'av1', 'h264'] }, terminal: true, files: true, metrics: false },
+      capabilities: { screen: { sources: ['mirror', 'virtual', 'session'], encodings: ['images', 'av1', 'h264'] }, terminal: true, files: true, metrics: true },
     }));
   });
   ws.on('message', (raw, isBinary) => {
@@ -85,7 +98,10 @@ function connect() {
     if (isBinary) return;
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
-    if (msg.type === 'welcome') log(`connected to the hub (protocol ${msg.protocol})`);
+    if (msg.type === 'welcome') {
+      log(`connected to the hub (protocol ${msg.protocol})`);
+      sampleEvery(msg.metrics?.intervalMs);
+    } else if (msg.type === 'metrics-rate') sampleEvery(msg.intervalMs);
     else if (msg.type === 'ping') ws.send(JSON.stringify({ type: 'pong', id: msg.id }));
     else if (msg.type === 'open') openStream(ws, msg);
     else if (msg.type === 'request') answer(ws, msg);
@@ -93,6 +109,7 @@ function connect() {
   ws.on('error', (err) => log(`control: ${err.message}`));
   ws.on('close', (code) => {
     clearInterval(watchdog);
+    clearInterval(metricsTimer);
     if (stopping) return;
     if (code === 4001) {
       log('removed by the hub');

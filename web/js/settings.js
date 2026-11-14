@@ -42,13 +42,42 @@ function migrate(saved) {
 const values = { ...DEFAULTS, ...migrate(load()) };
 const listeners = new Set();
 
+// Picture and source settings belong to the machine being shown. The hub's
+// own machine keeps them in KEY with everything else (as before machines
+// existed); another machine in KEY.<id>.
+export const HOST_KEYS = ['source', 'resolution', 'quality', 'priority', 'matchMonitor', 'monitor', 'encoding', 'encSpeed', 'bitrate'];
+let hostKey = null; // null: the hub's own machine
+let hostValues = null;
+
+function loadHost(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key)) || {};
+    return Object.fromEntries(HOST_KEYS.map((k) => [k, k in saved ? saved[k] : DEFAULTS[k]]));
+  } catch {
+    return Object.fromEntries(HOST_KEYS.map((k) => [k, DEFAULTS[k]]));
+  }
+}
+
 export const settings = {
-  get: (key) => values[key],
+  get: (key) => (hostValues && HOST_KEYS.includes(key) ? hostValues[key] : values[key]),
   set(key, value) {
-    if (values[key] === value) return;
-    values[key] = value;
-    try { localStorage.setItem(KEY, JSON.stringify(values)); } catch {}
+    if (settings.get(key) === value) return;
+    try {
+      if (hostValues && HOST_KEYS.includes(key)) {
+        hostValues[key] = value;
+        localStorage.setItem(hostKey, JSON.stringify(hostValues));
+      } else {
+        values[key] = value;
+        localStorage.setItem(KEY, JSON.stringify(values));
+      }
+    } catch {}
     for (const fn of listeners) fn(key, value);
+  },
+  /** Switches the machine whose picture settings get and set use; self is the hub's own. */
+  useHost(id, self) {
+    hostKey = self ? null : `${KEY}.${id}`;
+    hostValues = self ? null : loadHost(hostKey);
+    for (const k of HOST_KEYS) for (const fn of listeners) fn(k, settings.get(k));
   },
   onChange(fn) {
     listeners.add(fn);

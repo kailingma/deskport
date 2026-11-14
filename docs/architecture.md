@@ -33,6 +33,7 @@ browser ─▶ … ─▶ hub (hub/server.js :7900) ─▶ /agent/v1/control, /a
 | `hub/protocol.js` | Protocol constants, Ed25519 key generation, upgrade signing and checking, and which close codes are passed on. Used by both sides. |
 | `shim/host.js` | This machine's host work as one object: the screen, video and terminal endpoints and the machine's API (`/api/session`, `/api/session/stop`, `/api/monitors`). The hub uses it in its own process, or the agent shim does. |
 | `shim/agent.js` | The agent shim: connects to the hub, answers `open` and `request`, reconnects with backoff, exits when the hub does. Gets the hub's URL, its id and its private key in the environment, which it removes at start. |
+| `shim/metrics.js` | The shim's metrics samples for this machine, the same fields as the Rust agent's. |
 | `shim/files.js` | File streams for xdg-open's files: status and headers, then the body, with single byte ranges. |
 | `hub/hosts.js` | This host's identity, the list of other hosts, and `/h/<id>/` path routing (multi-host groundwork, see [multi-host.md](multi-host.md)). |
 | `shim/guac.js` | Guacamole protocol encoder and parser, and the bridge between a browser WebSocket and a guacd TCP connection. |
@@ -48,7 +49,8 @@ browser ─▶ … ─▶ hub (hub/server.js :7900) ─▶ /agent/v1/control, /a
 | `web/js/video.js` | Decodes the video encodings with WebCodecs into Guacamole's default layer. |
 | `shim/opener.js`, `bin/xdg-open` | Opens links and files from the terminal in the browser using it. |
 | `web/js/terminal.js` | Terminal view: xterm.js, reconnects, touch scrolling, selection and tmux's menu, copy and paste, appearance settings. |
-| `web/js/host.js` | The host a view talks to: builds every API and WebSocket URL, with an `/h/<id>` prefix for other hosts later. |
+| `web/js/host.js` | The machine the views talk to (`localHost`, switched with `use(id)`), which builds every API and WebSocket URL with an `/h/<id>` prefix for joined machines, and `hub` for the hub's own API. |
+| `web/js/machines.js` | Machines view: the list or grid (search, sort, own order by drag or arrow keys, kept per person with `/api/prefs`), Add machine, and the dashboard per machine from `/h/<id>/api/metrics` (live while open). |
 | `web/js/dialog.js` | The confirmation dialog. |
 | `web/js/settings.js`, `themes.js`, `keys.js`, `gestures.js` | Per-device settings store, terminal colour schemes and fonts, key codes and sticky modifiers, scroll momentum. |
 | `web/` (rest) | `index.html`, `style.css`, `theme-init.js` (applies a saved light/dark choice before first paint), icons, manifest. No build step. |

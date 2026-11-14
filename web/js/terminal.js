@@ -460,6 +460,17 @@ export function createTerminal({ host, setStatus, toast }) {
   return {
     ensureConnected() { if (!ws) connect(); },
     reconnect,
+    /** Another machine: clears the old one's output, then connects if a connection was open. */
+    switchHost() {
+      const wasOpen = Boolean(ws || retryTimer);
+      if (ws) { const old = ws; ws = null; old.onclose = null; old.close(); }
+      clearTimeout(retryTimer);
+      retryTimer = null;
+      stopTimers();
+      if (opened) xterm.reset();
+      setStatus('term', 'idle', 'Idle');
+      if (wasOpen) { retry = 0; connect(); }
+    },
     paste,
     focus() { xterm.focus(); },
     key(name) { input(TERM_SEQ[name] ?? name); },

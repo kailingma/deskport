@@ -40,6 +40,8 @@
     <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
     <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="17" height="7" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></symbol>
     <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3.5M8 7l4-4 4 4M7 10.5H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1"/></symbol>
   </svg>
 
@@ -57,6 +59,9 @@
       </button>
       <button class="seg" role="tab" data-view="term" aria-selected="false" aria-controls="view-term" title="Terminal (Alt+2)">
         <svg class="icon"><use href="#i-terminal"/></svg><span>Terminal</span>
+      </button>
+      <button class="seg" role="tab" data-view="machines" aria-selected="false" aria-controls="view-machines" title="Machines (Alt+3)">
+        <svg class="icon"><use href="#i-server"/></svg><span>Machines</span>
       </button>
     </div>
 
@@ -107,11 +112,34 @@
           </div>
         </div>
       </div>
+      <div class="empty-state" id="no-screen" hidden>
+        <p class="empty-title" id="no-screen-title">No screen</p>
+        <p class="empty-body">This machine runs deskport-agent without a screen. Its terminal and metrics work.</p>
+        <div class="empty-actions">
+          <button class="btn-text" data-view="term">Terminal</button>
+          <button class="btn-text" data-view="machines">Machines</button>
+        </div>
+      </div>
       <textarea class="ime" id="screen-ime" aria-label="Type on the remote desktop" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
     </section>
 
     <section class="view" id="view-term" role="tabpanel" hidden>
       <div class="term-wrap" id="term"></div>
+    </section>
+
+    <section class="view machines" id="view-machines" role="tabpanel" hidden aria-label="Machines">
+      <div class="machine-tools" id="machine-tools">
+        <input class="input machine-search" id="machine-search" type="search" placeholder="Search" aria-label="Search machines by name, system or architecture" autocomplete="off" spellcheck="false">
+        <select class="select" id="machine-sort" aria-label="Sort by"></select>
+        <div class="segmented segmented-sm" role="radiogroup" aria-label="Layout">
+          <button type="button" role="radio" data-machine-view="list">List</button>
+          <button type="button" role="radio" data-machine-view="grid">Grid</button>
+        </div>
+        <button class="btn-primary" id="add-machine-open" type="button">Add machine</button>
+      </div>
+      <div class="machine-list" id="machine-list" data-layout="list"></div>
+      <p class="machine-empty" id="machine-empty">Loading.</p>
+      <div class="machine-detail" id="machine-detail" hidden></div>
     </section>
   </main>
 
@@ -137,6 +165,9 @@
     </button>
     <button class="tabbar-item" data-view="term" aria-selected="false">
       <span class="tab-icon"><svg class="icon"><use href="#i-terminal"/></svg><span class="tab-dot" data-status-for="term"></span></span><span>Terminal</span>
+    </button>
+    <button class="tabbar-item" data-view="machines" aria-selected="false">
+      <span class="tab-icon"><svg class="icon"><use href="#i-server"/></svg><span class="tab-dot" data-status-for="machines"></span></span><span>Machines</span>
     </button>
     <button class="tabbar-item" data-action="sheet">
       <svg class="icon"><use href="#i-more"/></svg><span>More</span>
@@ -347,6 +378,20 @@
       </section>
 
       <p class="settings-foot" id="settings-who"></p>
+    </div>
+  </dialog>
+
+  <dialog class="confirm add-machine" id="add-machine" aria-labelledby="add-title">
+    <div class="dialog-card">
+      <h2 class="dialog-title" id="add-title">Add a machine</h2>
+      <p class="dialog-body">On the machine, as the user the agent should run as, run:</p>
+      <pre class="add-command" id="add-command"></pre>
+      <p class="dialog-body add-note" id="add-expiry"></p>
+      <p class="dialog-body add-note">It needs curl, and tmux for its terminal. It installs deskport-agent as a systemd user service and shows up here when it connects. Through Cloudflare, the hub's <code>/agent/*</code> path needs its own Access application with a Bypass policy (docs/setup.md, step 9).</p>
+      <div class="dialog-actions">
+        <button class="btn-text" type="button" data-add="copy">Copy</button>
+        <button class="btn-primary" type="button" data-add="close">Done</button>
+      </div>
     </div>
   </dialog>
 

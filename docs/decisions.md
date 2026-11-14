@@ -4,6 +4,18 @@ Choices made while building deskport, newest first, with the reason for each. En
 
 ## 2026-11-13
 
+### Machines view and dashboard (roadmap phase 3)
+A third view, Machines (Alt+3, and a fourth tab on phones), lists every machine with status, processor and memory, as a list or a grid, with search, sort and the person's own order. Choosing Screen or Terminal on a machine points both views at it; a dashboard per machine shows processor (each core too), memory, pressure, network, disks, storage, graphics, temperatures and the busiest processes, with ten-minute sparklines, sampling every second while it is open. Add machine mints a token and shows the install command. This machine's own metrics come from the shim (`shim/metrics.js`).
+
+Checked in headless Chromium against a test hub with the Rust agent joined: list and grid at 1280 × 800, a 390 × 844 phone in light and dark, the dashboard filling in, the sparkline crosshair, the terminal of the joined machine (an echo arrived in its tmux session), the no-screen message, Add machine, reordering with arrow keys (saved to `/api/prefs`), search, and no console errors. Not checked: dragging with a finger on a real phone, iPhone Safari, and the Screen view switching between two machines that both have screens (only this machine has one).
+
+Choices (*autonomous*):
+- **Order, layout and sort are stored on the hub per person** (`prefs.json`, keyed by the Access email), as the roadmap says, so they follow the owner across devices. The machine being shown and the view are per device (`localStorage`).
+- **Picture settings per machine:** the hub's own machine keeps them under `deskport.settings` as before, so nothing saved is lost; other machines under `deskport.settings.<id>`. Appearance and terminal look stay per device.
+- **Charts follow DESIGN.md:** one series per sparkline in the secondary ink, no fills or second hue, a crosshair readout on hover; meters are grey, never coloured by level, since green, amber and red mean connection state only.
+- **The dashboard redraws every second** but skips the redraw while the pointer is on a chart, so its crosshair stays put.
+- **No machine picker in the top bar.** Machines is a view of its own, and the bar names the machine being shown.
+
 ### deskport-agent, joining, and metrics (roadmap phase 2)
 Other machines run deskport-agent (`agent/`, Rust, [agent.md](agent.md)): one control socket to the hub, metrics, and the tmux terminal. A machine joins with a token minted on the hub (`POST /api/join-tokens`) and `curl <hub>/agent/v1/install.sh | sh -s -- <hub> <token>`, which downloads the agent from the hub, joins, and starts a systemd user unit. The hub keeps joined machines in `agents.json`, relays `/h/<id>/ws/term` and answers `/h/<id>/api/host` and `/h/<id>/api/metrics`.
 

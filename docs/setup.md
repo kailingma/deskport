@@ -136,13 +136,13 @@ Other machines join this one, the hub, with deskport-agent ([agent.md](agent.md)
 2. Give it one policy with action **Bypass** and an Include rule of Everyone. Access then lets these requests through, and deskport checks them itself: a join token for joining and downloading the agent, and the machine's own key for everything else (protocol.md, "Signed connections"). deskport serves nothing but the agent protocol under `/agent/`.
 3. Build the agent on the hub, so the hub can hand it out: install Rust (`curl https://sh.rustup.rs -sSf | sh`), then `npm run build:agent`. The build is a static binary for x86_64 Linux.
 
-Then, for each machine, mint a join token while signed in to the page. Until the page has a button for it (roadmap phase 3), run this in the browser's console on the page: `await (await fetch('/api/join-tokens', { method: 'POST' })).json()`. A token works once, within 15 minutes. On the new machine run
+Then, for each machine, open Machines in the page and choose Add machine. It shows a command with a join token that works once, within 15 minutes:
 
 ```bash
 curl -fsSL https://desk.example.com/agent/v1/install.sh | sh -s -- https://desk.example.com <join token>
 ```
 
-The machine needs `curl`, and `tmux` for its terminal. It appears in `/api/hosts` and its terminal is at `/h/<id>/ws/term`. The page's machine picker and the button that mints tokens come with roadmap phase 3.
+The machine needs `curl`, and `tmux` for its terminal. It appears under Machines when it connects.
 
 ## Troubleshooting
 
