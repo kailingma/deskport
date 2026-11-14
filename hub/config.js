@@ -37,6 +37,10 @@ export const config = {
   // DESKPORT_RELAY=0 runs it in this process instead.
   relay: env.DESKPORT_RELAY !== '0',
   hostsFile: path.join(configDir, 'hosts.json'),
+  // Machines that joined this hub (hub/registry.js).
+  agentsFile: env.DESKPORT_AGENTS_FILE || path.join(configDir, 'agents.json'),
+  // Per-person preferences (hub/prefs.js).
+  prefsFile: env.DESKPORT_PREFS_FILE || path.join(configDir, 'prefs.json'),
 
   access: {
     // e.g. "myteam.cloudflareaccess.com"

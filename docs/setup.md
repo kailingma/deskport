@@ -128,6 +128,22 @@ curl -sI https://desk.example.com/       # 302 to the Access login
 
 Then open `https://desk.example.com` in a browser, sign in through Access, and both tabs should connect.
 
+## 9. Other machines (optional)
+
+Other machines join this one, the hub, with deskport-agent ([agent.md](agent.md)). An agent cannot sign in as a person, so it needs a way past Access to `/agent/*` only:
+
+1. In Zero Trust, Access, Applications, add a second Self-hosted application with the same domain and the path `agent/*`.
+2. Give it one policy with action **Bypass** and an Include rule of Everyone. Access then lets these requests through, and deskport checks them itself: a join token for joining and downloading the agent, and the machine's own key for everything else (protocol.md, "Signed connections"). deskport serves nothing but the agent protocol under `/agent/`.
+3. Build the agent on the hub, so the hub can hand it out: install Rust (`curl https://sh.rustup.rs -sSf | sh`), then `npm run build:agent`. The build is a static binary for x86_64 Linux.
+
+Then, for each machine, mint a join token while signed in to the page. Until the page has a button for it (roadmap phase 3), run this in the browser's console on the page: `await (await fetch('/api/join-tokens', { method: 'POST' })).json()`. A token works once, within 15 minutes. On the new machine run
+
+```bash
+curl -fsSL https://desk.example.com/agent/v1/install.sh | sh -s -- https://desk.example.com <join token>
+```
+
+The machine needs `curl`, and `tmux` for its terminal. It appears in `/api/hosts` and its terminal is at `/h/<id>/ws/term`. The page's machine picker and the button that mints tokens come with roadmap phase 3.
+
 ## Troubleshooting
 
 | Symptom | Look at |

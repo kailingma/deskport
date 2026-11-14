@@ -2,7 +2,7 @@
 
 The contract between the hub and every agent. Change this page before changing either side. Nothing here may assume Linux: Windows agents follow the same protocol.
 
-Status: version 1, phase 1 of [roadmap.md](roadmap.md). The local agent (a Node shim around the current host code) speaks it on loopback. Metrics and joining over the network arrive in phase 2, the new screen stream in phase 4; their messages are defined here so both sides are written against one page.
+Status: version 1. The local agent (a Node shim around the current host code, `shim/`) speaks it on loopback; deskport-agent (`agent/`, [agent.md](agent.md)) speaks it from other machines, with metrics and the terminal. The new screen stream arrives in roadmap phase 4; its messages are defined here so both sides are written against one page.
 
 ## Roles
 
@@ -33,9 +33,9 @@ Content-Type: application/json
   "publicKey": "<base64url of the 32-byte raw Ed25519 public key>" }
 ```
 
-3. The hub answers `200 {"id": "<agent id>", "protocol": 1}` and stores the public key under that id, or `401 {"error": ...}` for an unknown, used or expired token. The id is a slug of the name, made unique by the hub (`a-z`, `0-9`, `-`, at most 63 characters, never `local`).
+3. The hub answers `200 {"id": "<agent id>", "protocol": 1}` and stores the public key under that id, `401 {"error": ...}` for an unknown, used or expired token, or `400 {"error": ...}` for a missing name or a bad key. The token is used up by any answer but 400. The id is a slug of the name, made unique by the hub (`a-z`, `0-9`, `-`, at most 63 characters, never `local`).
 
-Removing a machine in the hub deletes its key; its sockets are closed and later connections refused.
+`POST /agent/v1/join` is the only plain HTTP request under `/agent/`; the token is its authentication. Removing a machine in the hub (`DELETE /api/hosts/<id>`, same origin) deletes its key; its control socket is closed with 4001, after which the agent stops reconnecting, and later connections are refused.
 
 ## Signed connections
 
@@ -106,7 +106,7 @@ Each kind uses the messages of today's endpoint, documented in [architecture.md]
 | `term` | `/ws/term` | JSON text in both directions, binary control frames to the browser. |
 | `file` | `GET /api/files/<token>/<name>` | First a text message `{"status", "headers"}`, then the body as binary messages of at most 64 KB, then a close with 1000. The agent answers a single byte range with 206 and `Content-Range`, and `Accept-Ranges: bytes` always. |
 
-Compression on the agent's side is negotiated per socket with permessage-deflate. An agent on another machine offers it for `screen` and `term` and not for `video`; an agent on the hub's own machine (loopback) offers none. The hub compresses for the browser independently, as today.
+Compression on the agent's side is negotiated per socket with permessage-deflate. An agent on another machine may offer it for `screen` and `term`, never for `video`; an agent on the hub's own machine (loopback) offers none. The hub accepts it when offered. The hub compresses for the browser independently, as today.
 
 ## Metrics sample
 

@@ -25,7 +25,9 @@ browser ─▶ … ─▶ hub (hub/server.js :7900) ─▶ /agent/v1/control, /a
 | `hub/config.js` | Loads `deskport.env` and `rdp.env` from `~/.config/deskport` (or `DESKPORT_CONFIG_DIR`), builds the config object, and validates it. Variables already in the environment win over the files. |
 | `hub/auth.js` | Verifies the Cloudflare Access JWT, and checks WebSocket `Origin`. |
 | `hub/server.js` | Starts one host: authentication, security headers, and wiring of the API, the UI and the WebSocket upgrade router (by host and endpoint). |
-| `hub/api.js` | The JSON API of one host: `/api/me`, `/api/host`, `/api/hosts` from the hub, and `/api/session`, `/api/session/stop`, `/api/monitors` and `/api/files/...` from the machine (in process or through its agent). |
+| `hub/api.js` | The JSON API, mounted for this machine at `/` and for any machine at `/h/<id>/`: `/api/me`, `/api/hosts`, `DELETE /api/hosts/<id>`, `/api/join-tokens` and `/api/metrics` from the hub; `/api/host` from the machine's description; `/api/session`, `/api/session/stop`, `/api/monitors` and `/api/files/...` from the machine (in process or through its agent). |
+| `hub/machines.js` | One object per machine (this one and every joined one) that the API and the WebSocket router use: its description, API requests, file and stream relays, metrics. |
+| `hub/registry.js` | Machines that joined: their keys in `agents.json` (mode 600, or `DESKPORT_AGENTS_FILE`), join tokens (hash only, one use, 15 minutes), and an hour of metrics per machine in memory. |
 | `hub/ui.js` | The page, and every file it loads (its own and the vendored libraries) from memory under `/v/<content hash>/`, precompressed. Not mounted when `DESKPORT_UI=0`. |
 | `hub/agents.js` | The hub's side of the protocol: agents' keys, control sockets, API requests to an agent, and the relay that pairs a browser's socket with the stream socket the agent dials. File streams are written to the HTTP response. |
 | `hub/protocol.js` | Protocol constants, Ed25519 key generation, upgrade signing and checking, and which close codes are passed on. Used by both sides. |
@@ -50,6 +52,8 @@ browser ─▶ … ─▶ hub (hub/server.js :7900) ─▶ /agent/v1/control, /a
 | `web/js/dialog.js` | The confirmation dialog. |
 | `web/js/settings.js`, `themes.js`, `keys.js`, `gestures.js` | Per-device settings store, terminal colour schemes and fonts, key codes and sticky modifiers, scroll momentum. |
 | `web/` (rest) | `index.html`, `style.css`, `theme-init.js` (applies a saved light/dark choice before first paint), icons, manifest. No build step. |
+| `agent/` | deskport-agent, the Rust agent for other machines: control socket, metrics, terminal. See [agent.md](agent.md). |
+| `scripts/install-agent.sh` | Installs the agent on a machine, joins it and starts its systemd user unit; served by the hub at `/agent/v1/install.sh`. |
 | `scripts/` | `setup-rdp.sh`, `install-services.sh`, `desktop-session.sh` (the separate desktop), `session-scale.py` (sets its monitor scale), `session-systemd-proxy.py` (systemd on its private bus), `monitor-config.py` (reads and applies Mutter's monitor configuration), `make-icons.mjs`. |
 | `bench/` | `run.mjs`, the bench every speed change is measured with (see `bench/README.md`), `compare.mjs`, saved results in `results/`; older single measurements: `measure-screen.mjs`, `measure-typing.mjs` (`LINK_KBPS` simulates a slow link), `measure-clear.mjs`, `measure-terminal.mjs` (Terminal echo and Ctrl+C during a flood, over a simulated slow link). |
 | `deploy/` | guacd compose file and the cloudflared config example. |

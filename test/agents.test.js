@@ -50,7 +50,7 @@ test('byte ranges', () => {
 });
 
 /** A hub with one browser endpoint (/ws/term) relayed to agent "pc", and a file route. */
-async function startHub() {
+async function startHub({ wait = false } = {}) {
   const agents = createAgentHub({ log: quiet, version: 'test' });
   const browserWss = new WebSocketServer({ noServer: true });
   const app = express();
@@ -59,7 +59,7 @@ async function startHub() {
   server.on('upgrade', (req, socket, head) => {
     const { pathname, search } = new URL(req.url, 'http://x');
     if (agents.handles(pathname)) return agents.upgrade(req, socket, head);
-    browserWss.handleUpgrade(req, socket, head, (ws) => agents.openStream('pc', 'term', ws, { query: search, user: { email: 't@test' } }));
+    browserWss.handleUpgrade(req, socket, head, (ws) => agents.openStream('pc', 'term', ws, { query: search, user: { email: 't@test' }, wait }));
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `ws://127.0.0.1:${server.address().port}`;
@@ -196,4 +196,25 @@ test('file streams: whole file, a range, and an expired token', async () => {
   agent.control.close();
   hub.close();
   fs.rmSync(dir, { recursive: true });
+});
+
+test('relay: a stream for an expected agent waits for it to connect', async () => {
+  const hub = await startHub({ wait: true });
+  const key = generateAgentKey();
+  hub.agents.register('pc', key.publicKey);
+  const browser = new WebSocket(`${hub.base}/ws/term`);
+  await once(browser, 'open');
+  browser.send('early');
+  await new Promise((r) => setTimeout(r, 300));
+  const agent = await startAgent(hub, key, {
+    onOpen(msg, dialStream) {
+      const ws = dialStream();
+      ws.on('message', (data) => ws.send(`got ${data}`));
+    },
+  });
+  const [msg] = await once(browser, 'message');
+  assert.equal(msg.toString(), 'got early');
+  browser.close();
+  agent.control.close();
+  hub.close();
 });

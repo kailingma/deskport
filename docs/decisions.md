@@ -4,6 +4,22 @@ Choices made while building deskport, newest first, with the reason for each. En
 
 ## 2026-11-13
 
+### deskport-agent, joining, and metrics (roadmap phase 2)
+Other machines run deskport-agent (`agent/`, Rust, [agent.md](agent.md)): one control socket to the hub, metrics, and the tmux terminal. A machine joins with a token minted on the hub (`POST /api/join-tokens`) and `curl <hub>/agent/v1/install.sh | sh -s -- <hub> <token>`, which downloads the agent from the hub, joins, and starts a systemd user unit. The hub keeps joined machines in `agents.json`, relays `/h/<id>/ws/term` and answers `/h/<id>/api/host` and `/h/<id>/api/metrics`.
+
+Checked: an Alpine container (`alpine:3`, no desktop, `--network host`) joined a test hub through `install.sh` alone (download with the token, join, run), showed up online in `/api/hosts`, sent metrics (every second while asked for live, all sample fields but GPUs), and its terminal echoed through the hub in 5 ms; a screen upgrade for it got 404. A token works once; a refused join leaves the agent's saved key alone; removing the machine closes its socket with 4001 and the agent exits with status 3; after a hub restart the agent reconnected within about a second. Not checked: a second physical machine, a hub behind Cloudflare with the Bypass application, aarch64.
+
+Choices (*autonomous*):
+- **Rust installed with rustup** in the home directory (`~/.cargo`, `~/.rustup`, `--no-modify-path`, so shell profiles are unchanged). The roadmap's agent is Rust and the machine had no toolchain.
+- **A static musl binary** (`x86_64-unknown-linux-musl`, 4.3 MB) so one build runs on any x86_64 Linux. ring's C code is compiled with the system `gcc`, which works for this target without musl-gcc. A release build peaked at 0.5 GB with 4 jobs.
+- **The hub hands out the agent.** `/agent/v1/install.sh` is public under the Bypass policy (a shell script with nothing secret); `/agent/v1/download/<os>-<arch>` needs a join token that is still usable, in an `Authorization` header so it stays out of URLs and logs, and does not use it up.
+- **Crates:** tokio, tokio-tungstenite with rustls and webpki roots, ed25519-dalek, ureq for the one join request, libc for the pseudo-terminal (`openpty`, `setsid`, `TIOCSCTTY`) instead of a pty crate. tokio-tungstenite has no permessage-deflate, so the protocol now says an agent *may* offer compression; the hub still compresses for the browser.
+- **GPU figures from `nvidia-smi`** once per sample when it is installed, rather than NVML through dlopen: simpler, and a sample is once a second at most and only while a dashboard is open. About 40 ms per call here.
+- **Metrics in the hub's memory**: an hour per machine, every sample for five minutes, then one per 5 s. Nothing on disk.
+- **Network interfaces** from containers and bridges (`veth*`, `br-*`, `docker*`, `virbr*`) are left out of samples: this machine has twenty, and their traffic is counted on the real interface too.
+- **The agent's terminal** has no xdg-open forwarding yet (`files: false`) and passes no `DESKPORT_`, `RDP_`, `CF_ACCESS_` or `GUACD_` variables to tmux, as the shim does.
+- **`hosts.json` entries** (the earlier design, controller dials each host) are no longer listed in `/api/hosts`; their `/h/<id>/` paths still answer 501 with a pointer to joining instead.
+
 ### Hub and agent protocol, and the relay on loopback (roadmap phase 1)
 The code is split into `hub/`, `shim/` and `web/`, and this machine's host work now reaches the browser through the protocol in [protocol.md](protocol.md): the hub starts the agent shim (`shim/agent.js`) as a child process, the shim dials the hub on loopback with signed upgrades, and the hub relays every screen, video and terminal socket unchanged. `DESKPORT_RELAY=0` keeps the in-process path for now.
 

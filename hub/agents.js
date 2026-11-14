@@ -43,6 +43,21 @@ export function createAgentHub({ log, version }) {
   const pendingStreams = new Map(); // stream id -> { agentId, attach(ws), fail(message) }
   const pendingRequests = new Map(); // request id -> { resolve, reject, timer }
   const verify = createUpgradeVerifier({ keyFor: (id) => keys.get(id) || null });
+  const rates = new Map(); // id -> metrics interval in ms
+  const lastSeen = new Map(); // id -> Unix ms of the last message
+  const waiting = new Map(); // id -> [resolve] for callers waiting for the agent to connect
+  /** Resolves true once the agent is connected, or false after ms. */
+  function whenConnected(id, ms) {
+    if (agents.get(id)?.welcomed) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const list = waiting.get(id) || [];
+      const timer = setTimeout(() => { waiting.set(id, (waiting.get(id) || []).filter((f) => f !== done)); resolve(false); }, ms);
+      const done = () => { clearTimeout(timer); resolve(true); };
+      list.push(done);
+      waiting.set(id, list);
+    });
+  }
+  let hub;
 
   // Agents offer deflate only from other machines (docs/protocol.md).
   const wss = new WebSocketServer({
@@ -70,14 +85,17 @@ export function createAgentHub({ log, version }) {
     }, PING_MS);
     ws.on('message', (raw, isBinary) => {
       entry.lastSeen = Date.now();
+      lastSeen.set(id, entry.lastSeen);
       if (isBinary) return;
       let msg;
       try { msg = JSON.parse(raw.toString()); } catch { return; }
       if (msg.type === 'hello' && !entry.welcomed) {
         entry.hello = { agent: msg.agent || {}, capabilities: msg.capabilities || {} };
         entry.welcomed = true;
-        ws.send(JSON.stringify({ type: 'welcome', protocol: PROTOCOL, hub: { version }, id, metrics: { intervalMs: 15000 } }));
+        ws.send(JSON.stringify({ type: 'welcome', protocol: PROTOCOL, hub: { version }, id, metrics: { intervalMs: rates.get(id) ?? 15000 } }));
         log(`agent ${id} connected (${entry.hello.agent.version || '?'}, ${entry.hello.agent.os || '?'})`);
+        for (const done of waiting.get(id) || []) done();
+        waiting.delete(id);
       } else if (!entry.welcomed) {
         // Nothing but hello before welcome.
       } else if (msg.type === 'response') {
@@ -86,6 +104,8 @@ export function createAgentHub({ log, version }) {
         pendingRequests.delete(msg.id);
         clearTimeout(p.timer);
         p.resolve({ status: Number.isInteger(msg.status) ? msg.status : 502, body: msg.body ?? null });
+      } else if (msg.type === 'metrics' && msg.sample && typeof msg.sample === 'object') {
+        hub.onMetrics?.(id, Number(msg.t), msg.sample);
       } else if (msg.type === 'stream-failed') {
         pendingStreams.get(msg.stream)?.fail(String(msg.message || 'the machine could not open this stream'));
       }
@@ -95,19 +115,33 @@ export function createAgentHub({ log, version }) {
       if (agents.get(id) === entry) {
         agents.delete(id);
         log(`agent ${id} disconnected`);
-        for (const [sid, p] of pendingStreams) if (p.agentId === id) p.fail('the machine disconnected');
+        for (const p of pendingStreams.values()) if (p.agentId === id) p.fail('the machine disconnected');
       }
     });
     ws.on('error', () => {});
   }
 
-  return {
+  hub = {
+    /** Set by the registry: called with (id, t, sample) for each metrics message. */
+    onMetrics: null,
+
+    /** Unix ms of the agent's last message, or null. */
+    lastSeen(id) { return lastSeen.get(id) ?? null; },
+
+    /** Asks the agent to sample every ms (docs/protocol.md, metrics-rate). */
+    setMetricsRate(id, ms) {
+      rates.set(id, ms);
+      try { send(id, { type: 'metrics-rate', intervalMs: ms }); } catch { /* sent in welcome when it connects */ }
+    },
+
     /** Registers or replaces an agent's raw base64url Ed25519 public key. */
     register(id, publicKey) { keys.set(id, publicKeyFrom(publicKey)); },
 
     /** Forgets an agent: its key, and its sockets are closed. */
     remove(id) {
       keys.delete(id);
+      rates.delete(id);
+      lastSeen.delete(id);
       agents.get(id)?.ws.close(4001, 'removed');
     },
 
@@ -146,7 +180,7 @@ export function createAgentHub({ log, version }) {
      * Asks the agent to dial a stream for the browser's socket and relays the
      * two. Messages from the browser before the agent's socket are held.
      */
-    openStream(agentId, kind, browser, { query, user, headers }) {
+    openStream(agentId, kind, browser, { query, user, headers, wait = false }) {
       const stream = crypto.randomBytes(16).toString('base64url');
       const held = [];
       let heldBytes = 0;
@@ -186,15 +220,23 @@ export function createAgentHub({ log, version }) {
           pair(browser, agent);
         },
       });
-      try {
-        send(agentId, { type: 'open', stream, kind, query, user, ...(headers ? { headers } : {}) });
-      } catch (err) {
-        fail(err.message);
-      }
+      const open = () => {
+        if (done) return;
+        try {
+          send(agentId, { type: 'open', stream, kind, query, user, ...(headers ? { headers } : {}) });
+        } catch (err) {
+          fail(err.message);
+        }
+      };
+      // An agent that is expected (this machine's shim, starting or restarting)
+      // gets until the open timeout to connect.
+      if (wait && !agents.get(agentId)?.welcomed) whenConnected(agentId, OPEN_TIMEOUT_MS).then(open);
+      else open();
     },
 
     /** Sends the browser's API call to the agent; resolves { status, body }. */
-    request(agentId, { method, path, query, body, user }) {
+    async request(agentId, { method, path, query, body, user }, { wait = false } = {}) {
+      if (wait) await whenConnected(agentId, REQUEST_TIMEOUT_MS);
       return new Promise((resolve, reject) => {
         const id = crypto.randomBytes(9).toString('base64url');
         const timer = setTimeout(() => {
@@ -216,9 +258,9 @@ export function createAgentHub({ log, version }) {
      * Fetches a file the agent serves (xdg-open in the terminal) and writes it
      * to the HTTP response.
      */
-    file(agentId, { token, name, headers, user }, res) {
+    file(agentId, { token, name, headers, user }, res, { wait = false } = {}) {
       const fake = new FileSink(res);
-      this.openStream(agentId, 'file', fake, { query: new URLSearchParams({ token, name }).toString(), user, headers });
+      hub.openStream(agentId, 'file', fake, { query: new URLSearchParams({ token, name }).toString(), user, headers, wait });
     },
 
     close() {
@@ -226,6 +268,7 @@ export function createAgentHub({ log, version }) {
       for (const p of pendingStreams.values()) p.fail('the hub is shutting down');
     },
   };
+  return hub;
 }
 
 /**

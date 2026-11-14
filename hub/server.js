@@ -12,7 +12,10 @@ import { createLocalHost } from '../shim/host.js';
 import { createHostRegistry, routeFor } from './hosts.js';
 import { createApi } from './api.js';
 import { createUi } from './ui.js';
-import { createAgentHub, AgentUnavailable } from './agents.js';
+import { createAgentHub } from './agents.js';
+import { createRegistry, JoinError } from './registry.js';
+import { createMachines } from './machines.js';
+import { createPrefs } from './prefs.js';
 import { generateAgentKey, KINDS } from './protocol.js';
 
 // Starts one deskport host: authentication and security headers, the API, the
@@ -43,35 +46,45 @@ const selfId = hosts.self.id;
 const local = config.relay ? null : createLocalHost({ config, root, log });
 if (!config.relay) log('DESKPORT_RELAY=0: host work runs in this process');
 
-// The machine's API and streams, in this process or through its agent.
-const FILE_HEADERS = ['range', 'if-none-match', 'if-modified-since'];
-const machine = local
-  ? {
-      request: ({ method, path: p }) => local.requests[`${method} ${p}`](),
-      file: (req, res) => local.opener.serveFile(req, res),
-      stream: (kind, ws, req) => local.streams[kind](ws, req.url.replace(/^\/h\/[^/?]+/, '')),
-    }
-  : {
-      request: (r) => agents.request(selfId, r).catch((err) => {
-        if (err instanceof AgentUnavailable) return { status: 503, body: { error: err.message } };
-        throw err;
-      }),
-      file: (req, res) => agents.file(selfId, {
-        token: req.params.token,
-        name: req.params.name,
-        headers: Object.fromEntries(FILE_HEADERS.filter((h) => req.headers[h]).map((h) => [h, req.headers[h]])),
-        user: { email: req.user.email },
-      }, res),
-      stream: (kind, ws, req) => agents.openStream(selfId, kind, ws, {
-        query: new URL(req.url, 'http://localhost').search,
-        user: { email: req.user.email },
-      }),
-    };
+const registry = createRegistry({ file: config.agentsFile, agents, reservedIds: [selfId], log });
+const machines = createMachines({ hosts, agents, registry, local });
+const prefs = createPrefs({ file: config.prefsFile, log });
 
 // ---------- HTTP ----------
 
 const app = express();
 app.disable('x-powered-by');
+
+// Joining a machine (docs/protocol.md): the join token is the authentication,
+// so this is answered before the person check. Nothing else under /agent/ is
+// plain HTTP.
+app.post('/agent/v1/join', express.json({ limit: '8kb' }), (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  try {
+    res.json(registry.join(req.body));
+  } catch (err) {
+    if (!(err instanceof JoinError)) throw err;
+    log(`join refused: ${err.message}`);
+    res.status(err.status).json({ error: err.message });
+  }
+});
+// The install script, and the agent's build for a platform to anyone holding
+// a join token that is still usable (scripts/install-agent.sh).
+const AGENT_BUILDS = { 'linux-x86_64': 'x86_64-unknown-linux-musl', 'linux-aarch64': 'aarch64-unknown-linux-musl' };
+app.get('/agent/v1/install.sh', (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.type('text/x-shellscript').sendFile(path.join(root, 'scripts/install-agent.sh'));
+});
+app.get('/agent/v1/download/:platform', (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  const token = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
+  if (!registry.tokenValid(token)) return res.status(401).type('text/plain').send('A join token that is still usable is required.\n');
+  const triple = AGENT_BUILDS[req.params.platform];
+  const file = triple && path.join(root, 'agent/target', triple, 'release/deskport-agent');
+  if (!file || !fs.existsSync(file)) return res.status(404).type('text/plain').send(`No agent build for ${req.params.platform} on this hub (npm run build:agent).\n`);
+  res.type('application/octet-stream').sendFile(file);
+});
+app.use('/agent', (req, res) => res.status(404).type('text/plain').send('Not Found'));
 
 app.use(async (req, res, next) => {
   try {
@@ -95,13 +108,13 @@ app.use((req, res, next) => {
   next();
 });
 
-const api = createApi({ hosts, machine });
-app.use(api);
+const api = createApi({ hosts, registry, prefs, machines });
+app.use((req, res, next) => { req.machine = machines.self; next(); }, api);
 app.use('/h/:hostId', (req, res, next) => {
-  const host = hosts.get(req.params.hostId);
-  if (!host) return res.status(404).json({ error: 'unknown host' });
-  if (!host.local) return res.status(501).json({ error: 'controlling other hosts is not implemented yet' });
-  next();
+  req.machine = machines.get(req.params.hostId);
+  if (req.machine) return next();
+  if (hosts.get(req.params.hostId)) return res.status(501).json({ error: 'hosts.json entries are not reachable; join the machine with an agent instead' });
+  res.status(404).json({ error: 'unknown host' });
 }, api);
 
 if (config.ui) app.use(createUi({ root, dev: config.insecureDev, log }));
@@ -145,8 +158,9 @@ server.on('upgrade', async (req, socket, head) => {
   if (agents.handles(pathname)) return agents.upgrade(req, socket, head);
   const route = routeFor(pathname);
   const endpoint = endpoints[route.path];
-  const host = hosts.get(route.hostId);
-  if (!endpoint || !host) return reject(socket, 404, 'Not Found');
+  const machine = machines.get(route.hostId);
+  const kind = KINDS[route.path];
+  if (!endpoint || !machine || !machine.offers(kind)) return reject(socket, 404, 'Not Found');
   if (!sameOrigin(req)) {
     log(`denied upgrade ${pathname}: origin ${req.headers.origin} does not match host ${req.headers.host}`);
     return reject(socket, 403, 'Forbidden');
@@ -157,13 +171,9 @@ server.on('upgrade', async (req, socket, head) => {
     log(`denied upgrade ${pathname}: ${err.message}`);
     return reject(socket, 403, 'Forbidden');
   }
-  if (!host.local) {
-    log(`denied upgrade ${pathname}: controlling other hosts is not implemented yet`);
-    return reject(socket, 501, 'Not Implemented');
-  }
   endpoint.handleUpgrade(req, socket, head, (ws) => {
     log(`${pathname} opened by ${req.user.email}`);
-    machine.stream(KINDS[route.path], ws, req);
+    machine.stream(kind, ws, req);
   });
 });
 
