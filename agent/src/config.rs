@@ -15,6 +15,9 @@ pub struct Config {
     pub hub: String,
     pub id: String,
     pub name: String,
+    /// The hub's release key (raw Ed25519, base64url); builds it offers must be signed with it.
+    #[serde(default, rename = "releaseKey", skip_serializing_if = "Option::is_none")]
+    pub release_key: Option<String>,
 }
 
 pub fn dir() -> PathBuf {

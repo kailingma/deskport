@@ -1,6 +1,6 @@
 # Roadmap: fast path, hub and agents
 
-Status: phases 0 to 3 done (3 in emulation only), phase 4 in progress (2026-11-13). This page is the map for the next stage of deskport. Each phase ends with something that works and is measured; nothing is removed until its replacement matches it. Update the status column as phases land, and log choices in [decisions.md](decisions.md).
+Status: phases 0 to 3 and 5 done (3 in emulation only), phase 4 in progress (2026-11-13). This page is the map for the next stage of deskport. Each phase ends with something that works and is measured; nothing is removed until its replacement matches it. Update the status column as phases land, and log choices in [decisions.md](decisions.md).
 
 ## Goals
 
@@ -106,7 +106,7 @@ Moves happen in their own commits with no behaviour change, so history stays rea
 | 2 | **Rust agent: metrics and terminal; join flow.** Agent binary with control socket, metrics and the tmux terminal; join tokens in the hub UI; install script that puts the binary and a systemd user unit in place. A second Linux machine joins. | A machine without a desktop shows in the hub with its terminal and metrics. | done (2026-11-13; checked with an Alpine container on this machine, not yet a second physical machine; the join button moved to phase 3) |
 | 3 | **Picker and dashboard.** Host list or grid, sorting, search, own order, status; dashboard per machine; per-host settings (`deskport.settings.<id>`) and the remembered host. | Usable on phone and desktop; checked in emulation, iPhone by the owner. | done in emulation (2026-11-13); iPhone not yet checked |
 | 4 | **Fast screen path in the agent.** Mutter RemoteDesktop and ScreenCast, encoders, pointer, clipboard, separate desktop scale, images fallback. Behind a setting until the bench shows it at least as good as the current path everywhere. | Default for the separate desktop; then My monitor after the owner tries it. guacd removed when nothing uses it. | in progress: direct path for the separate desktop behind a setting (2026-11-13), not yet the default (decisions.md) |
-| 5 | **Updates and packaging.** Agent self-update offered by the hub (signed builds), uninstall, release builds for x86_64 and aarch64 Linux. | A version bump reaches every agent. | planned |
+| 5 | **Updates and packaging.** Agent self-update offered by the hub (signed builds), uninstall, release builds for x86_64 and aarch64 Linux. | A version bump reaches every agent. | done (2026-11-13; aarch64 build not run on a real machine) |
 | 6 | **Direct links.** WebRTC over Tailscale or LAN with the hub relay as fallback. | Bench shows the gain on the tailnet. | planned |
 | 7 | **Windows agent.** Capture, encode, input, ConPTY terminal, metrics, Windows service. | A Windows machine joins and streams. | later |
 

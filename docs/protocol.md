@@ -33,7 +33,7 @@ Content-Type: application/json
   "publicKey": "<base64url of the 32-byte raw Ed25519 public key>" }
 ```
 
-3. The hub answers `200 {"id": "<agent id>", "protocol": 1}` and stores the public key under that id, `401 {"error": ...}` for an unknown, used or expired token, or `400 {"error": ...}` for a missing name or a bad key. The token is used up by any answer but 400. The id is a slug of the name, made unique by the hub (`a-z`, `0-9`, `-`, at most 63 characters, never `local`).
+3. The hub answers `200 {"id": "<agent id>", "protocol": 1, "releaseKey": "<base64url raw Ed25519 public key>"}` and stores the public key under that id, `401 {"error": ...}` for an unknown, used or expired token, or `400 {"error": ...}` for a missing name or a bad key. The token is used up by any answer but 400. The id is a slug of the name, made unique by the hub (`a-z`, `0-9`, `-`, at most 63 characters, never `local`).
 
 `POST /agent/v1/join` is the only plain HTTP request under `/agent/`; the token is its authentication. Removing a machine in the hub (`DELETE /api/hosts/<id>`, same origin) deletes its key; its control socket is closed with 4001, after which the agent stops reconnecting, and later connections are refused.
 
@@ -84,6 +84,7 @@ A machine without a desktop sends `"screen": null`.
 | `open` | `stream`, `kind`, `query`, `user: {email}`, and for `file` `headers` | A browser opened a stream; the agent dials it within 10 s. |
 | `request` | `id`, `method`, `path`, `query`, `body`, `user: {email}` | A browser called the machine's API. |
 | `metrics-rate` | `intervalMs` | 1000 while someone views the machine's dashboard, 15000 otherwise. |
+| `update` | `version`, `path`, `sha256`, `size`, `signature` | After `hello`, when the hub has a newer build for the agent's `os` and `arch` than `agent.version`. |
 
 `stream` is 16 random bytes, base64url, made by the hub. `query` is the browser's query string unchanged (with the leading `?`, or empty); the agent validates it exactly as the endpoint does today, since the browser is not trusted to send sane values. For `file`, `query` is `token=<token>&name=<name>` from the path, and `headers` carries the browser's `range`, `if-none-match` and `if-modified-since` when present.
 
@@ -107,6 +108,10 @@ Each kind uses the messages of today's endpoint, documented in [architecture.md]
 | `file` | `GET /api/files/<token>/<name>` | First a text message `{"status", "headers"}`, then the body as binary messages of at most 64 KB, then a close with 1000. The agent answers a single byte range with 206 and `Content-Range`, and `Accept-Ranges: bytes` always. |
 
 Compression on the agent's side is negotiated per socket with permessage-deflate. An agent on another machine may offer it for `screen` and `term`, never for `video`; an agent on the hub's own machine (loopback) offers none. The hub accepts it when offered. The hub compresses for the browser independently, as today.
+
+### Updates
+
+`releaseKey` (from joining) is the hub's release key; the agent keeps it with its settings. A build the hub offers is signed with it: `signature` is the base64url Ed25519 signature of the UTF-8 string `deskport-agent-build-1\n<os>-<arch>\n<version>\n<sha256 hex>`. The agent fetches `path` (`/agent/v1/download/<os>-<arch>`) with the signature headers of "Signed connections" (they work on that GET as on upgrades), checks size, SHA-256 and signature, puts the new binary in place of its own, and exits with status 75 so its service manager starts the new one. It reports the result in the next `hello`. An agent that cannot check the signature (no `releaseKey`, from before this field) ignores `update`. Versions compare as dotted numbers.
 
 ## Metrics sample
 
@@ -135,3 +140,4 @@ CPU times are in clock ticks as `/proc/stat` gives them (Windows agents convert 
 | Version | Date | Change |
 | --- | --- | --- |
 | 1 | 2026-11-12 | First version. |
+| 1 | 2026-11-13 | Added within version 1 (unknown fields and types are ignored): `releaseKey` in the join answer, the `update` message, signed GETs of `/agent/v1/download/`. |

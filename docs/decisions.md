@@ -4,6 +4,17 @@ Choices made while building deskport, newest first, with the reason for each. En
 
 ## 2026-11-13
 
+### Agent updates, uninstall and aarch64 builds (roadmap phase 5)
+The hub offers its agent build to every joined agent that runs an older version, when it connects; the agent checks size, SHA-256 and an Ed25519 signature with the hub's release key before it replaces itself and exits with 75 for systemd to restart it. `deskport-agent uninstall` removes the unit, settings and binary. `npm run build:agent:aarch64` cross-builds a static aarch64 binary.
+
+Checked: a 0.1.0 agent joined a test hub that had a 0.2.0 build; on connecting it was offered 0.2.0, downloaded it with a signed request (an unsigned one got 401), installed it and exited with 75; the binary then reported 0.2.0, and the next connection got no offer. Unit tests cover a changed body, a changed version and another key. `uninstall` removed the settings and the binary. Not checked: running the aarch64 build (no arm64 machine or emulator here; `file` reports a static ARM aarch64 executable), an update under systemd on another machine.
+
+Choices (*autonomous*):
+- **The hub signs builds when it serves them**, with a release key it makes on first start, rather than signing at build time with a separate offline key. Whoever controls the hub already has a shell on every agent through the terminal, so a separate key would not narrow who can push code; the signature guards against a build changed on the way or on disk, and the agent pins the key it got when it joined.
+- **Updates are automatic** when an agent connects; there is no button. A version bump in `agent/Cargo.toml` and a build on the hub reach every agent.
+- **cargo-zigbuild through `uvx`** for aarch64, since the machine has no cross compiler and installing one needs sudo. Zig (96 MB) went into uv's cache.
+- **The agent version is 0.2.0** with this change; the shim keeps the package version and is never offered agent builds.
+
 ### Direct screen path for the separate desktop, behind a setting (roadmap phase 4, first step)
 Checked first, as the roadmap asked: GNOME Shell 50.1's RemoteDesktop session (version 1) on the separate desktop's bus has keysym and keycode input, absolute and relative pointer, buttons, axis (also discrete), touch, `EnableClipboard` with `SetSelection`, `SelectionWrite` and `SelectionRead`, `ConnectToEIS` and `SetKeymap`; ScreenCast (version 4) has `RecordVirtual`. Nothing the roadmap assumed is missing.
 

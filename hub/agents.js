@@ -94,6 +94,11 @@ export function createAgentHub({ log, version }) {
         entry.welcomed = true;
         ws.send(JSON.stringify({ type: 'welcome', protocol: PROTOCOL, hub: { version }, id, metrics: { intervalMs: rates.get(id) ?? 15000 } }));
         log(`agent ${id} connected (${entry.hello.agent.version || '?'}, ${entry.hello.agent.os || '?'})`);
+        const offer = hub.onHello?.(id, entry.hello);
+        if (offer) {
+          ws.send(JSON.stringify(offer));
+          log(`agent ${id}: offered version ${offer.version}`);
+        }
         for (const done of waiting.get(id) || []) done();
         waiting.delete(id);
       } else if (!entry.welcomed) {
@@ -124,6 +129,11 @@ export function createAgentHub({ log, version }) {
   hub = {
     /** Set by the registry: called with (id, t, sample) for each metrics message. */
     onMetrics: null,
+    /** Set by the server: (id, hello) -> an update message to send, or null. */
+    onHello: null,
+
+    /** Checks the signature headers of a plain request from an agent; returns its id or throws. */
+    verifyRequest(req) { return verify(req); },
 
     /** Unix ms of the agent's last message, or null. */
     lastSeen(id) { return lastSeen.get(id) ?? null; },

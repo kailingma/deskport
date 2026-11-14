@@ -16,6 +16,7 @@ import { createAgentHub } from './agents.js';
 import { createRegistry, JoinError } from './registry.js';
 import { createMachines } from './machines.js';
 import { createPrefs } from './prefs.js';
+import { createReleases } from './releases.js';
 import { generateAgentKey, KINDS } from './protocol.js';
 
 // Starts one deskport host: authentication and security headers, the API, the
@@ -46,7 +47,10 @@ const selfId = hosts.self.id;
 const local = config.relay ? null : createLocalHost({ config, root, log });
 if (!config.relay) log('DESKPORT_RELAY=0: host work runs in this process');
 
-const registry = createRegistry({ file: config.agentsFile, agents, reservedIds: [selfId], log });
+const releases = createReleases({ root, keyFile: config.releaseKeyFile, log });
+const registry = createRegistry({ file: config.agentsFile, agents, reservedIds: [selfId], releaseKey: releases.publicKey, log });
+// Joined machines get newer agent builds offered; this machine's shim is not an agent build.
+agents.onHello = (id, hello) => (id === selfId ? null : releases.offerFor(hello));
 const machines = createMachines({ hosts, agents, registry, local });
 const prefs = createPrefs({ file: config.prefsFile, log });
 
@@ -69,8 +73,8 @@ app.post('/agent/v1/join', express.json({ limit: '8kb' }), (req, res) => {
   }
 });
 // The install script, and the agent's build for a platform to anyone holding
-// a join token that is still usable (scripts/install-agent.sh).
-const AGENT_BUILDS = { 'linux-x86_64': 'x86_64-unknown-linux-musl', 'linux-aarch64': 'aarch64-unknown-linux-musl' };
+// a join token that is still usable (scripts/install-agent.sh) or to a joined
+// agent that signs the request (updates, docs/protocol.md).
 app.get('/agent/v1/install.sh', (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   res.type('text/x-shellscript').sendFile(path.join(root, 'scripts/install-agent.sh'));
@@ -78,10 +82,13 @@ app.get('/agent/v1/install.sh', (req, res) => {
 app.get('/agent/v1/download/:platform', (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   const token = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
-  if (!registry.tokenValid(token)) return res.status(401).type('text/plain').send('A join token that is still usable is required.\n');
-  const triple = AGENT_BUILDS[req.params.platform];
-  const file = triple && path.join(root, 'agent/target', triple, 'release/deskport-agent');
-  if (!file || !fs.existsSync(file)) return res.status(404).type('text/plain').send(`No agent build for ${req.params.platform} on this hub (npm run build:agent).\n`);
+  let allowed = registry.tokenValid(token);
+  if (!allowed && req.headers['deskport-signature']) {
+    try { agents.verifyRequest(req); allowed = true; } catch (err) { log(`download refused: ${err.message}`); }
+  }
+  if (!allowed) return res.status(401).type('text/plain').send('A join token that is still usable is required.\n');
+  const file = releases.fileFor(req.params.platform);
+  if (!file) return res.status(404).type('text/plain').send(`No agent build for ${req.params.platform} on this hub (npm run build:agent).\n`);
   res.type('application/octet-stream').sendFile(file);
 });
 app.use('/agent', (req, res) => res.status(404).type('text/plain').send('Not Found'));

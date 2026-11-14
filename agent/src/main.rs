@@ -4,12 +4,14 @@
 //!
 //!   deskport-agent join <hub url> <join token> [--name <name>]
 //!   deskport-agent run
+//!   deskport-agent uninstall
 //!   deskport-agent version
 
 mod config;
 mod metrics;
 mod protocol;
 mod terminal;
+mod update;
 
 use futures_util::{SinkExt, StreamExt};
 use protocol::{PREFIX, SUBPROTOCOL};
@@ -27,7 +29,7 @@ const SILENCE: Duration = Duration::from_secs(60);
 const REMOVED: &str = "this machine was removed from the hub";
 
 fn usage() -> ! {
-    eprintln!("usage: deskport-agent join <hub url> <join token> [--name <name>]\n       deskport-agent run\n       deskport-agent version");
+    eprintln!("usage: deskport-agent join <hub url> <join token> [--name <name>]\n       deskport-agent run\n       deskport-agent uninstall\n       deskport-agent version");
     std::process::exit(2);
 }
 
@@ -58,7 +60,8 @@ fn join(args: &[String]) -> Result<(), String> {
         return Err(format!("join refused ({status}): {}", v["error"].as_str().unwrap_or("no reason given")));
     }
     let id = v["id"].as_str().ok_or("join: no id in the answer")?.to_string();
-    config::save(&config::Config { hub, id: id.clone(), name }, &seed)?;
+    let release_key = v["releaseKey"].as_str().map(String::from);
+    config::save(&config::Config { hub, id: id.clone(), name, release_key }, &seed)?;
     println!("joined as {id}; settings in {}", config::dir().display());
     Ok(())
 }
@@ -133,6 +136,17 @@ async fn control(cfg: &config::Config, seed: &[u8; 32], connected: &mut Option<I
                     Some("ping") if welcomed => {
                         let _ = out_tx.send(json!({ "type": "pong", "id": v["id"] }).to_string());
                     }
+                    Some("update") if welcomed => {
+                        let (cfg, seed) = (cfg.clone(), *seed);
+                        let offer = v.clone();
+                        tokio::task::spawn_blocking(move || match update::apply(&cfg, &seed, &offer) {
+                            Ok(version) => {
+                                eprintln!("updated to {version}; restarting");
+                                std::process::exit(update::RESTART);
+                            }
+                            Err(e) => eprintln!("update not applied: {e}"),
+                        });
+                    }
                     Some("request") if welcomed => {
                         let _ = out_tx.send(json!({ "type": "response", "id": v["id"], "status": 404, "body": { "error": "not available on this machine" } }).to_string());
                     }
@@ -197,6 +211,7 @@ fn main() {
     let result = match args.first().map(String::as_str) {
         Some("join") => join(&args[1..]),
         Some("run") => tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap().block_on(run()),
+        Some("uninstall") => update::uninstall(),
         Some("version") | Some("--version") => {
             println!("deskport-agent {VERSION} (protocol {})", protocol::PROTOCOL);
             Ok(())

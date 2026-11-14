@@ -25,7 +25,7 @@ export class JoinError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-export function createRegistry({ file, agents, reservedIds = [], log, now = () => Date.now() }) {
+export function createRegistry({ file, agents, reservedIds = [], releaseKey = null, log, now = () => Date.now() }) {
   const machines = new Map(); // id -> { id, name, os, arch, publicKey, joinedAt }
   const tokens = new Map(); // sha256 -> expires
   const metrics = new Map(); // id -> [{ t, sample }]
@@ -108,7 +108,7 @@ export function createRegistry({ file, agents, reservedIds = [], log, now = () =
       machines.set(id, m);
       save();
       log(`machine ${id} joined (${m.os} ${m.arch})`);
-      return { id, protocol: PROTOCOL };
+      return { id, protocol: PROTOCOL, ...(releaseKey ? { releaseKey } : {}) };
     },
 
     get(id) { return machines.get(id) || null; },

@@ -41,6 +41,8 @@ export const config = {
   agentsFile: env.DESKPORT_AGENTS_FILE || path.join(configDir, 'agents.json'),
   // Per-person preferences (hub/prefs.js).
   prefsFile: env.DESKPORT_PREFS_FILE || path.join(configDir, 'prefs.json'),
+  // The key agent builds are signed with (hub/releases.js).
+  releaseKeyFile: env.DESKPORT_RELEASE_KEY_FILE || path.join(configDir, 'release.key'),
 
   access: {
     // e.g. "myteam.cloudflareaccess.com"
