@@ -62,6 +62,10 @@ NVENC_PRESET = ["p1", "p4", "p7"]
 # Quantizer bounds per quality. The lowest bound also caps how many bits a
 # still picture gets, so lower quality uses less data on a quiet desktop too.
 AV1_Q = {"low": (40, 63), "medium": (28, 58), "high": (16, 52), "lossless": (4, 44)}
+# How many milliseconds of the bitrate one H.264 frame may take after a quiet
+# moment (NVENC's VBV buffer): 1000, or the config's "vbvMs" (200 for the
+# direct path, decisions.md). DESKPORT_VBV_MS overrides both for measuring.
+VBV_ENV = os.environ.get("DESKPORT_VBV_MS")
 H264_QP = {"low": (32, 51), "medium": (24, 45), "high": (18, 40), "lossless": (12, 34)}
 
 out_lock = threading.Lock()
@@ -258,6 +262,11 @@ def watch_clipboard(bus, rd):
     return set_text
 
 
+def vbv_kbits(cfg, kbps):
+    ms = int(VBV_ENV) if VBV_ENV else int(cfg.get("vbvMs", 1000))
+    return max(1, kbps * ms // 1000)
+
+
 def encoder_description(cfg):
     w, h = cfg["width"], cfg["height"]
     speed = max(0, min(2, int(cfg.get("speed", 0))))
@@ -267,7 +276,7 @@ def encoder_description(cfg):
         qmin, qmax = H264_QP.get(quality, H264_QP["high"])
         return ("NV12",
                 f"nvh264enc name=enc preset={NVENC_PRESET[speed]} tune=ultra-low-latency rc-mode=cbr "
-                f"bitrate={kbps} vbv-buffer-size={kbps} gop-size=-1 bframes=0 zerolatency=true "
+                f"bitrate={kbps} vbv-buffer-size={vbv_kbits(cfg, kbps)} gop-size=-1 bframes=0 zerolatency=true "
                 f"repeat-sequence-header=true aud=false qp-min-i={qmin} qp-min-p={qmin} qp-max-i={qmax} qp-max-p={qmax} "
                 "! h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au")
     qmin, qmax = AV1_Q.get(quality, AV1_Q["high"])
@@ -433,7 +442,7 @@ def main():
             kbps = max(50, int(cmd["kbps"]))
             if cfg["codec"] == "h264":
                 enc.set_property("bitrate", kbps)
-                enc.set_property("vbv-buffer-size", kbps)
+                enc.set_property("vbv-buffer-size", vbv_kbits(cfg, kbps))
             else:
                 enc.set_property("target-bitrate", kbps)
         if "fps" in cmd:

@@ -126,7 +126,7 @@ export function createVideoSource({ bus, monitor, codec, speed, quality, priorit
     rc = createRateControl({ bitrate, priority, ceiling });
     const now = performance.now();
     const kbps = rc.step(now);
-    const cfg = { bus, monitor, match: size.desktop, width, height, codec, speed, quality, kbps, fps: FPS[priority], direct };
+    const cfg = { bus, monitor, match: size.desktop, width, height, codec, speed, quality, kbps, fps: FPS[priority], direct, ...(direct ? { vbvMs: 200 } : {}) };
     log(`video: ${codec} ${width}x${height} from ${direct ? 'a direct session' : monitor} (speed ${speed}, ${quality}, ${priority}, bitrate ${bitrate})`);
     const c = spawn('python3', [script, JSON.stringify(cfg)], { stdio: ['pipe', 'pipe', 'pipe'] });
     child = c;

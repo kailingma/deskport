@@ -1,0 +1,204 @@
+{
+  "label": "direct-vbv200",
+  "date": "2026-11-14T02:44:35.590Z",
+  "commit": "4883b49",
+  "dirty": true,
+  "query": "path=direct",
+  "settings": {
+    "relay": true
+  },
+  "links": {
+    "4m": {
+      "kbps": 4000,
+      "rttMs": 150
+    }
+  },
+  "results": [
+    {
+      "run": 1,
+      "link": "4m",
+      "encoding": "h264",
+      "firstPictureMs": 861,
+      "keyToPixel": {
+        "n": 24,
+        "missed": 0,
+        "median": 187,
+        "p90": 202,
+        "max": 549
+      },
+      "pressToPixel": {
+        "n": 28,
+        "missed": 0,
+        "median": 183,
+        "p90": 524,
+        "max": 578
+      },
+      "idle": {
+        "secs": 5,
+        "kB": 0,
+        "fps": 0
+      },
+      "typing": {
+        "secs": 18.1,
+        "kB": 491,
+        "fps": 6.8
+      },
+      "motion": {
+        "secs": 9.8,
+        "kB": 1703,
+        "fps": 16.5
+      },
+      "motionKBPerMin": 10427,
+      "idleKBPerMin": 0,
+      "typingKBPerMin": 1628,
+      "catchUpMs": 19,
+      "codec": "avc1.640034",
+      "encodeMs": {
+        "n": 27,
+        "missed": 0,
+        "median": 1,
+        "p90": 48,
+        "max": 210
+      },
+      "kbps": {
+        "n": 36,
+        "missed": 0,
+        "median": 2375,
+        "p90": 3069,
+        "max": 3149
+      },
+      "rttMs": {
+        "n": 36,
+        "missed": 0,
+        "median": 152,
+        "p90": 158,
+        "max": 159
+      },
+      "wallS": 39
+    },
+    {
+      "run": 2,
+      "link": "4m",
+      "encoding": "h264",
+      "firstPictureMs": 837,
+      "keyToPixel": {
+        "n": 24,
+        "missed": 0,
+        "median": 186,
+        "p90": 197,
+        "max": 231
+      },
+      "pressToPixel": {
+        "n": 28,
+        "missed": 0,
+        "median": 183,
+        "p90": 549,
+        "max": 562
+      },
+      "idle": {
+        "secs": 5,
+        "kB": 0,
+        "fps": 0
+      },
+      "typing": {
+        "secs": 17.8,
+        "kB": 428,
+        "fps": 6.8
+      },
+      "motion": {
+        "secs": 9.8,
+        "kB": 1601,
+        "fps": 15.9
+      },
+      "motionKBPerMin": 9802,
+      "idleKBPerMin": 0,
+      "typingKBPerMin": 1443,
+      "catchUpMs": 0,
+      "codec": "avc1.640034",
+      "encodeMs": {
+        "n": 26,
+        "missed": 0,
+        "median": 1,
+        "p90": 1,
+        "max": 20
+      },
+      "kbps": {
+        "n": 34,
+        "missed": 0,
+        "median": 2500,
+        "p90": 2843,
+        "max": 2993
+      },
+      "rttMs": {
+        "n": 34,
+        "missed": 0,
+        "median": 151,
+        "p90": 153,
+        "max": 161
+      },
+      "wallS": 39
+    },
+    {
+      "run": 3,
+      "link": "4m",
+      "encoding": "h264",
+      "firstPictureMs": 851,
+      "keyToPixel": {
+        "n": 24,
+        "missed": 0,
+        "median": 179,
+        "p90": 196,
+        "max": 209
+      },
+      "pressToPixel": {
+        "n": 28,
+        "missed": 0,
+        "median": 183,
+        "p90": 533,
+        "max": 588
+      },
+      "idle": {
+        "secs": 5,
+        "kB": 48,
+        "fps": 0.2
+      },
+      "typing": {
+        "secs": 16.1,
+        "kB": 322,
+        "fps": 6.9
+      },
+      "motion": {
+        "secs": 9.8,
+        "kB": 2005,
+        "fps": 17.1
+      },
+      "motionKBPerMin": 12276,
+      "idleKBPerMin": 576,
+      "typingKBPerMin": 1200,
+      "catchUpMs": 128,
+      "codec": "avc1.640034",
+      "encodeMs": {
+        "n": 27,
+        "missed": 0,
+        "median": 1,
+        "p90": 48,
+        "max": 283
+      },
+      "kbps": {
+        "n": 35,
+        "missed": 0,
+        "median": 2375,
+        "p90": 3401,
+        "max": 3768
+      },
+      "rttMs": {
+        "n": 35,
+        "missed": 0,
+        "median": 151,
+        "p90": 154,
+        "max": 154
+      },
+      "wallS": 37
+    }
+  ]
+}

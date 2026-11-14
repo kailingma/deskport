@@ -22,7 +22,11 @@ Bench, three runs (`bench/results/2026-11-13-direct.json`, `--query path=direct`
 
 Keystrokes are 4 to 6 ms faster at the median, large changes up to 72 ms faster, and the picture starts two to six times sooner. The direct path also shows what the RDP path skipped: GNOME's overview animation at 13 to 17 frames a second instead of 4 to 5, which costs two to eighteen times the data during large changes and a little catch-up on slow links. On 4 Mbit/s with H.264, two of three runs had their slowest tenth of keys at about 525 ms (one round trip plus 340 ms), against 215 ms before.
 
-So it stays off by default: it is not at least as good everywhere (data during motion, the H.264 tail at 4 Mbit/s). Next for it: cap the frame rate during large changes by the link (the rate control already sees the queue), find what delays those H.264 keys (a frame queued in front of them is the likely cause), a pointer drawn by the browser from cursor metadata, and touch events.
+So it stays off by default: it is not at least as good everywhere (data during motion, the H.264 tail at 4 Mbit/s).
+
+The H.264 tail was NVENC's buffer: `vbv-buffer-size` was one second of the bitrate, so after a quiet moment one frame could take most of a second's bits, about 230 KB at 1.8 Mbit/s, or 460 ms on a 4 Mbit/s link. With 200 ms (three runs each, `2026-11-13-direct-vbv200.json`, `-direct-vbv200-1m.json`): 4 Mbit/s key p90 525 → 197 ms, typing 2,110 → 1,443 KB/min; 1 Mbit/s key p90 769 → 484 ms, median 458 → 455 ms, catch-up 291 → 348 ms. The direct path now uses 200 ms. On the RDP H.264 path the same change was mixed (`2026-11-13-rdp-vbv200.json` against the baseline: p90 41 → 48 ms on loopback, 215 → 212 on 4 Mbit/s, 935 → 799 on 1 Mbit/s; 1 Mbit/s median 459 → 467 ms and catch-up 82 → 187 ms), so that path keeps one second.
+
+Next for the direct path: cap the frame rate during large changes by the link (the rate control already sees the queue), a pointer drawn by the browser from cursor metadata, and touch events.
 
 Choices (*autonomous*):
 - **The direct path lives in the shim and the Python encoder helper**, reusing the GStreamer pipeline that already records ScreenCast for the video encodings, not yet in the Rust agent. The bench decides first whether the path is worth it; the Rust agent can take it over once it is.
