@@ -7,6 +7,7 @@ import { createScaler } from './scaler.js';
 import { createAckAhead, lastSyncTimestamp } from './pacing.js';
 import { createDrawFilter, createVideoSource, ENCODINGS, BITRATES } from './video.js';
 import { handleDirect } from './direct.js';
+import { claimScreen } from './screen-claim.js';
 
 // Guacamole protocol: each element is "<length>.<value>", elements are
 // separated by "," and an instruction ends with ";". Lengths count Unicode
@@ -213,6 +214,9 @@ const BASE_PARAMS = {
 
 const VIDEO_SELF_ACK_MS = 250;
 
+// The current viewer for each source (screen-claim.js).
+const screenClaims = new Map();
+
 export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, mainBus }, log) {
   const url = new URL(req.url, 'http://localhost');
   const width = intParam(url.searchParams.get('width'), 1280, 320, 7680);
@@ -273,7 +277,7 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
 
   let releaseMonitors = null;
   ws.on('close', () => releaseMonitors?.());
-  const ready = source === 'session'
+  const ready = claimScreen(screenClaims, source, ws).then(() => (source === 'session'
     ? session.ensureRunning()
     : desktopSharingReady(rdp.hostname, port, log)
       .then(() => setShareMode(source === 'virtual' ? 'extend' : 'mirror-primary', log))
@@ -282,7 +286,7 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
         const release = await monitors.acquire(match ? { width, height, monitor } : { monitor });
         if (ws.readyState === ws.OPEN) releaseMonitors = release;
         else release();
-      });
+      })));
   ready.then(() => {
     if (ws.readyState === ws.OPEN) connect();
   }, (err) => {
