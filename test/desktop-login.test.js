@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hasDesktopLogin } from '../shim/guac.js';
+import { hasDesktopLogin, desktopLogins } from '../shim/guac.js';
 
 // Shapes from `loginctl list-sessions -j`.
 const manager = { session: '1', uid: 1000, user: 'owner', seat: null, class: 'manager', tty: null };
@@ -22,4 +22,8 @@ test('a signed-in seat session counts', () => {
 
 test('another user\'s desktop does not count', () => {
   assert.equal(hasDesktopLogin([{ ...desktop, uid: 1001 }], 1000), false);
+});
+
+test('the lock check looks at desktop sessions only', () => {
+  assert.deepEqual(desktopLogins([manager, greeter, ssh, desktop], 1000), ['3']);
 });

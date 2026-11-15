@@ -24,6 +24,7 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 
 ## Traps found the hard way
 
+- While the main screen is locked, GNOME Shell refuses every RemoteDesktop and ScreenCast session on the main desktop ("Session creation inhibited") and ends running ones. My monitor and Extra monitors cannot work until someone unlocks it at the computer; the bridge reports this from logind's `LockedHint`.
 - `grdctl --headless rdp enable` also starts `gnome-remote-desktop-headless.service`, which conflicts with `gnome-remote-desktop.service` and stops desktop sharing. Set the headless settings with `gsettings` (see `scripts/setup-rdp.sh`).
 - A second gnome-shell for the same user needs the private bus and runtime directory that `desktop-session.sh` sets up. Without them it replaces the main session's accessibility socket (`$XDG_RUNTIME_DIR/at-spi/bus`). The private runtime directory needs links to the real one's per-user entries; without the `systemd` link, terminal apps fail with "Failed to connect to user scope bus".
 - Unix socket paths are limited to 108 bytes. A long `XDG_RUNTIME_DIR` fails with "Argument list too long".

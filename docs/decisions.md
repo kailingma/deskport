@@ -2,6 +2,11 @@
 
 Choices made while building deskport, newest first, with the reason for each. Entries marked *autonomous* were made while the owner was away and asked for choices to be made and logged.
 
+## 2026-11-14
+
+### My monitor while the screen is locked
+The owner reported My monitor as broken. The main desktop's screen was locked (logind `LockedHint=yes`), and gnome-remote-desktop logged "Session creation inhibited" for each viewer. GNOME Shell 50 calls `inhibit_remote_access()` whenever its session mode does not allow screencasts, and the lock screen (`unlock-dialog`) inherits `allowScreencast: false`. While locked, Mutter refuses every new RemoteDesktop and ScreenCast session (a read-only `ScreenCast.CreateSession` on the main bus failed the same way) and ends running ones. So no path, RDP or direct, can show My monitor or an Extra monitor until someone unlocks it at the computer; the separate desktop is not affected. The bridge now checks `LockedHint` of this user's seat sessions before connecting, and again when guacd reports an error, and tells the browser the screen is locked instead of passing on guacd's generic error. Tested against the locked screen: the message arrives before connecting (22 ms) and, with the first check skipped, after guacd's error (1.9 s). Not changed: GNOME's automatic screen lock (`org.gnome.desktop.screensaver lock-enabled`); turning it off would keep My monitor reachable but is the owner's call.
+
 ## 2026-11-13
 
 ### Agent updates, uninstall and aarch64 builds (roadmap phase 5)

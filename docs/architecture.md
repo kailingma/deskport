@@ -152,7 +152,7 @@ GNOME creates each client's monitor at scale 1, which is tiny on a phone. `sessi
 
 `GET /api/session` reports the unit's state and memory; `POST /api/session/stop` (same-origin only) stops it.
 
-In the browser, the tunnel's receive timeout is 8 s (Guacamole pings every 500 ms). `Guacamole.Client` does not watch its tunnel, so `web/js/screen.js` does: a lost connection is retried at once, then after 1, 2, 4 and 8 s (the count resets after 10 s connected), and in the background it waits until the page is shown. A connection the server closes normally, or five failed tries, show the Disconnected card. Errors the server sends (nobody signed in, guacd unreachable) are shown and not retried.
+In the browser, the tunnel's receive timeout is 8 s (Guacamole pings every 500 ms). `Guacamole.Client` does not watch its tunnel, so `web/js/screen.js` does: a lost connection is retried at once, then after 1, 2, 4 and 8 s (the count resets after 10 s connected), and in the background it waits until the page is shown. A connection the server closes normally, or five failed tries, show the Disconnected card. Errors the server sends (nobody signed in, the main screen locked, guacd unreachable) are shown and not retried.
 
 Audio is not requested. The screen WebSocket uses permessage-deflate at zlib level 1: the images travel as base64, and compression wins back most of that overhead. The credentials never reach the browser.
 

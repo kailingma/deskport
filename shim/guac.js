@@ -157,7 +157,32 @@ async function setShareMode(mode, log) {
 
 /** True if `uid` is signed in to a desktop on a seat (not only ssh or a lingering user manager). */
 export function hasDesktopLogin(sessions, uid) {
-  return sessions.some((s) => s.uid === uid && s.class === 'user' && s.seat);
+  return desktopLogins(sessions, uid).length > 0;
+}
+
+/** The ids of `uid`'s desktop sessions on a seat. */
+export function desktopLogins(sessions, uid) {
+  return sessions.filter((s) => s.uid === uid && s.class === 'user' && s.seat).map((s) => s.session);
+}
+
+export const DESKTOP_LOCKED = 'This computer\'s screen is locked, and GNOME does not share a locked screen. '
+  + 'Unlock it at the computer, or choose Separate desktop.';
+
+/**
+ * True when every desktop login of this user is locked (logind's LockedHint,
+ * which GNOME Shell sets). GNOME Shell refuses remote desktop sessions on a
+ * locked screen ("Session creation inhibited") and ends the running ones.
+ */
+async function desktopLocked(log) {
+  try {
+    const ids = desktopLogins(JSON.parse((await run('loginctl', ['list-sessions', '-j'])).stdout), process.getuid());
+    if (!ids.length) return false;
+    const hints = await Promise.all(ids.map((id) => run('loginctl', ['show-session', id, '-p', 'LockedHint', '--value'])));
+    return hints.every((r) => r.stdout.trim() === 'yes');
+  } catch (err) {
+    log(`screen: could not read the lock state: ${err.message}`);
+    return false;
+  }
 }
 
 function portOpen(host, port, ms = 1500) {
@@ -280,6 +305,12 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
   const ready = claimScreen(screenClaims, source, ws).then(() => (source === 'session'
     ? session.ensureRunning()
     : desktopSharingReady(rdp.hostname, port, log)
+      .then(async () => {
+        if (LOOPBACK.has(rdp.hostname) && await desktopLocked(log)) {
+          log('screen: the main desktop is locked');
+          throw new Error(DESKTOP_LOCKED);
+        }
+      })
       .then(() => setShareMode(source === 'virtual' ? 'extend' : 'mirror-primary', log))
       .then(async () => {
         if (!match && monitor === 'primary') return;
@@ -347,6 +378,7 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
       })
       : null;
     let closed = false;
+    let upstreamError = false;
 
     const closeAll = (code, reason) => {
       if (closed) return;
@@ -418,6 +450,20 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
       }
 
       if (!instructions.length) return;
+      // GNOME ends a shared main desktop when its screen locks; say so
+      // instead of passing on guacd's generic error.
+      const errorAt = source === 'session' || !LOOPBACK.has(rdp.hostname) ? -1 : instructions.findIndex((i) => i.elements[0] === 'error');
+      if (errorAt !== -1) {
+        const [, message, status] = instructions[errorAt].elements;
+        instructions = instructions.slice(0, errorAt);
+        upstreamError = true;
+        socket.pause();
+        desktopLocked(log).then((locked) => {
+          if (locked) log('screen: the main desktop locked');
+          sendError(locked ? DESKTOP_LOCKED : message, Number(status) || STATUS_SERVER_ERROR);
+        });
+        if (!instructions.length) return;
+      }
       if (videoSource) {
         const size = instructions.findLast((i) => i.elements[0] === 'size' && i.elements[1] === '0');
         if (size) desktopSize = [Number(size.elements[2]), Number(size.elements[3])];
@@ -442,7 +488,7 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
       sendError(`guacd is not reachable at ${guacd.host}:${guacd.port}`, STATUS_UPSTREAM_NOT_FOUND);
     });
 
-    socket.on('close', () => closeAll(1000, ''));
+    socket.on('close', () => { if (!upstreamError) closeAll(1000, ''); });
 
     ws.on('message', (raw) => {
       const msg = raw.toString();
