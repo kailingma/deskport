@@ -5,6 +5,7 @@ colors:
   primary: "oklch(0.55 0.19 260)"
   primary-ring: "oklch(0.45 0.2 260)"
   primary-dark: "oklch(0.66 0.163 260)"
+  primary-fill-dark: "oklch(0.55 0.2 260)"
   on-primary: "oklch(1 0 0)"
   ground: "oklch(0.975 0 0)"
   surface: "oklch(1 0 0)"
@@ -164,8 +165,9 @@ Density is low-to-moderate and calm. Controls are 32px on desktop and grow to 40
 A neutral grey ladder carries almost everything; blue is the only chromatic voice, and state colours are held in reserve for connection status.
 
 ### Primary
-- **Dashboard Blue** (oklch(0.55 0.19 260) light, oklch(0.66 0.163 260) dark): primary button fill, selected tab-bar item, active modifier key, switch-on track, range accent, focus ring, text selection tint (at 12% / 18% alpha), the touch ring on the remote screen, and the small mark in the top bar.
-- **Blue Ring** (oklch(0.45 0.2 260) light, oklch(0.47 0.209 260) dark): the 1px outline that edges filled blue controls so they hold their shape.
+- **Dashboard Blue** (oklch(0.55 0.19 260) light, oklch(0.66 0.163 260) dark): selected tab-bar item, active modifier key, switch-on track, range accent, focus ring, text selection tint (at 12% / 18% alpha), the touch ring on the remote screen, and the small mark in the top bar.
+- **Blue Fill** (`--primary-fill`; oklch(0.55 0.19 260) light, oklch(0.55 0.2 260) dark): the fill of filled blue controls with white text (primary button, toast action, active modifier key, switch-on track). Dark mode keeps it darker than Dashboard Blue so those controls do not glare.
+- **Blue Ring** (oklch(0.45 0.2 260) light, oklch(0.44 0.19 260) dark): the 1px outline that edges filled blue controls so they hold their shape.
 
 ### Neutral
 - **Ground** (oklch(0.975 0 0) light, oklch(0.13 0 0) dark): the page background behind everything.
@@ -236,7 +238,7 @@ Rounded rectangles with small, consistent corners: 6px inside compact groups (se
 ### Buttons
 - **Icon button:** 32px square (40px on coarse pointers), transparent, secondary ink; hover adds Surface Raised fill, a hairline border and full ink; active uses Surface Pressed.
 - **Text button:** the same, 32px high, 13px/500 label (for Ctrl+Alt+Del).
-- **Primary:** 36px, 16px padding, Dashboard Blue with a Blue Ring outline and a 1px soft shadow; hover brightens by 6%. Used once, for Reconnect.
+- **Primary:** 36px, 16px padding, Blue Fill as a slight vertical gradient (lightness +0.035 at the top, −0.035 at the bottom) with a Blue Ring outline, a 1px inner top highlight at 12% white and a 1px soft shadow; hover brightens by 6%. Used once, for Reconnect.
 
 ### Segmented control
 - Surface Raised track with hairline, 3px padding, 8px radius. Items are 28px high, secondary ink; the selected item becomes a Surface pill with a hairline. Used for Screen/Terminal and, in a smaller 2px-padded variant, for Settings choices.
