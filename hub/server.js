@@ -91,6 +91,11 @@ app.get('/agent/v1/install.sh', (req, res) => {
   if (origin) script = script.replace('SERVED_BY="__DESKPORT_HUB__"', `SERVED_BY="${origin}"`);
   res.type('text/x-shellscript').send(script);
 });
+// Removes the agent again; nothing to fill in.
+app.get('/agent/v1/uninstall.sh', (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.type('text/x-shellscript').sendFile(path.join(root, 'scripts/uninstall-agent.sh'), { dotfiles: 'allow' });
+});
 app.get('/agent/v1/install.ps1', (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   let script = fs.readFileSync(path.join(root, 'scripts/install-agent.ps1'), 'utf8');

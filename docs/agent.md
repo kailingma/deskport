@@ -21,6 +21,14 @@ The hub writes its own address into the script it serves (from the request's `Ho
 3. offers to install tmux with apt, dnf, yum, pacman, zypper or apk (with sudo after asking; as root without asking),
 4. writes and starts the systemd user unit `deskport-agent.service`, and prints the `loginctl enable-linger` command if the agent would stop at logout. Without a systemd user session (a container, a minimal server) it writes `~/.local/bin/deskport-agent-loop`, which restarts the agent like the unit would and stops on exit status 3, starts it in the background with its log in the settings directory, and adds a crontab `@reboot` entry for it.
 
+## Uninstall
+
+```bash
+curl -fsSL https://<hub>/agent/v1/uninstall.sh | sh
+```
+
+`scripts/uninstall-agent.sh` (served as `/agent/v1/uninstall.sh`, no token needed) stops the agent and removes everything step 4 above set up: the systemd user unit, or the restart loop (stopped through its pidfile, then any `deskport-agent-loop` or `deskport-agent run` left) and its crontab `@reboot` entry. Then it deletes `~/.local/bin/deskport-agent`, `deskport-agent-loop` and the settings directory with the machine's key. It works when the binary is already gone and leaves tmux installed. The hub lists the machine as offline until you use Remove on its dashboard. `deskport-agent uninstall` (below) does the same for the systemd unit but not for the restart loop or the crontab entry.
+
 ## Commands
 
 | Command | What it does |

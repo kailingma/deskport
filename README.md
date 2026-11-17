@@ -150,7 +150,7 @@ On the hub, open Machines, Add machine for a join token (it works once, for 15 m
 curl -fsSL https://<your hub>/agent/v1/install.sh | sh -s -- <join token>
 ```
 
-It downloads the agent for the machine, joins it to the hub, installs tmux if you agree, and starts the agent at boot. Without the token it asks for one.
+It downloads the agent for the machine, joins it to the hub, installs tmux if you agree, and starts the agent at boot. Without the token it asks for one. To remove it again: `curl -fsSL https://<your hub>/agent/v1/uninstall.sh | sh`, then Remove on the machine's dashboard.
 
 On Windows 10 1809 or later, in PowerShell as that user (not as administrator), after `npm run build:agent:windows` on the hub:
 

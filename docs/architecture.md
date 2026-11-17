@@ -57,6 +57,7 @@ browser ─▶ … ─▶ hub (hub/server.js :7900) ─▶ /agent/v1/control, /a
 | `web/` (rest) | `index.html`, `style.css`, `theme-init.js` (applies a saved light/dark choice before first paint), icons, manifest. No build step. |
 | `agent/` | deskport-agent, the Rust agent for other machines: control socket, metrics, terminal. See [agent.md](agent.md). |
 | `scripts/install-agent.sh` | Installs the agent on a machine, joins it and starts its systemd user unit; served by the hub at `/agent/v1/install.sh`. |
+| `scripts/uninstall-agent.sh` | Stops and removes what install-agent.sh put in place; served at `/agent/v1/uninstall.sh`. |
 | `scripts/` | `setup-rdp.sh`, `install-services.sh`, `desktop-session.sh` (the separate desktop), `session-scale.py` (sets its monitor scale), `session-systemd-proxy.py` (systemd on its private bus), `monitor-config.py` (reads and applies Mutter's monitor configuration), `make-icons.mjs`. |
 | `bench/` | `run.mjs`, the bench every speed change is measured with (see `bench/README.md`), `compare.mjs`, saved results in `results/`; older single measurements: `measure-screen.mjs`, `measure-typing.mjs` (`LINK_KBPS` simulates a slow link), `measure-clear.mjs`, `measure-terminal.mjs` (Terminal echo and Ctrl+C during a flood, over a simulated slow link). |
 | `deploy/` | guacd compose file and the cloudflared config example. |
