@@ -2,7 +2,9 @@
 
 One per machine. It dials out to the hub, so a machine needs no tunnel, Access application or open port of its own. It speaks [protocol.md](protocol.md). Source: `agent/` (Rust).
 
-What it does today: the control socket, metrics, and the terminal (tmux). It has no screen yet (roadmap phase 4); this desktop's screen still comes from the agent shim (`shim/`), which the hub starts itself.
+What it does today: the control socket, metrics, and the terminal (tmux on Linux, a shell in a pseudo console on Windows). It has no screen yet (roadmap phase 4); this desktop's screen still comes from the agent shim (`shim/`), which the hub starts itself.
+
+This page describes Linux. The Windows build (install with PowerShell, a scheduled task at logon, ConPTY terminal, Windows metrics) is in [windows.md](windows.md); it has not run on Windows yet.
 
 ## Install and join
 
@@ -25,7 +27,8 @@ The hub writes its own address into the script it serves (from the request's `Ho
 | --- | --- |
 | `deskport-agent join <hub url> <token> [--name <name>]` | Joins the hub. The name defaults to the hostname; the hub makes the id from it. The hub URL must be https, or http on loopback. |
 | `deskport-agent run` | Connects and stays connected, reconnecting with backoff (0, 1, 2, 4, 8, 15 s, 20% jitter). Exits with status 3 when the hub removed the machine; the unit does not restart it then. |
-| `deskport-agent uninstall` | Stops and removes the systemd user unit, the settings directory and the binary. Remove the machine on its dashboard to make the hub forget it too. |
+| `deskport-agent service` | Windows only: the runner the scheduled task starts ([windows.md](windows.md), How it runs). |
+| `deskport-agent uninstall` | Stops and removes the systemd user unit (on Windows the scheduled task), the settings directory and the binary. Remove the machine on its dashboard to make the hub forget it too. |
 | `deskport-agent version` | Version and protocol version. |
 
 ## Files and settings
@@ -41,7 +44,7 @@ The hub writes its own address into the script it serves (from the request's `Ho
 
 ## Terminal
 
-The same messages as `shim/terminal.js` (architecture.md, Terminal): output batched for 4 ms after the first chunk, flow control with `?flow=1` (stops reading the pseudo-terminal above 128 K unacknowledged characters, counted as UTF-16 like the page does), pongs as binary JSON, a WebSocket ping every 25 s. Variables starting with `RDP_`, `CF_ACCESS_`, `DESKPORT_` or `GUACD_` are not passed to tmux. There is no xdg-open forwarding yet (`files: false`).
+The same messages as `shim/terminal.js` (architecture.md, Terminal): output batched for 4 ms after the first chunk, flow control with `?flow=1` (stops reading the pseudo-terminal above 128 K unacknowledged characters, counted as UTF-16 like the page does), pongs as binary JSON, a WebSocket ping every 25 s. Variables starting with `RDP_`, `CF_ACCESS_`, `DESKPORT_` or `GUACD_` (in any case) are not passed to tmux. There is no xdg-open forwarding yet (`files: false`).
 
 ## Metrics
 
@@ -58,6 +61,9 @@ export PATH="$HOME/.cargo/bin:$PATH"
 npm run test:agent     # cargo test
 npm run build:agent           # static release binary, agent/target/x86_64-unknown-linux-musl/release/
 npm run build:agent:aarch64   # static aarch64 build, with cargo-zigbuild through uvx (downloads Zig once)
+npm run build:agent:windows   # x86_64 Windows .exe, also with cargo-zigbuild (rustup target add x86_64-pc-windows-gnu once)
 ```
 
 The musl build compiles ring's C code with the system `gcc` (`CC_x86_64_unknown_linux_musl=gcc`). A release build peaks at about 0.5 GB of memory with 4 jobs.
+
+Source layout: `metrics/` and `terminal/` have a module per platform (`linux.rs`/`unix.rs`, `windows.rs`) behind `cfg(windows)`; what both use and the arithmetic of the Windows collector are in each `mod.rs`, so `cargo test` on Linux covers them. `sys.rs` has the hostname, home directory and PATH lookup, `winsec.rs` the key file's access list, `runner.rs` the Windows runner. The hub serves the builds in `agent/target/<triple>/release/` (`hub/releases.js`).

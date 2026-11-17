@@ -1,6 +1,6 @@
 # Roadmap: fast path, hub and agents
 
-Status: phases 0 to 3 and 5 done (3 in emulation only), phase 4 in progress (2026-11-13). This page is the map for the next stage of deskport. Each phase ends with something that works and is measured; nothing is removed until its replacement matches it. Update the status column as phases land, and log choices in [decisions.md](decisions.md).
+Status: phases 0 to 3 and 5 done (3 in emulation only), phase 4 in progress (2026-11-13), phase 7 built without its screen and not yet run on Windows (2026-11-16). This page is the map for the next stage of deskport. Each phase ends with something that works and is measured; nothing is removed until its replacement matches it. Update the status column as phases land, and log choices in [decisions.md](decisions.md).
 
 ## Goals
 
@@ -71,7 +71,7 @@ Each change is measured with the bench (phase 0) against the current path before
 Collected by the agent, sent on the control socket every second while someone is viewing that machine's dashboard and every 15 s otherwise.
 
 - Linux sources: `/proc/stat` (per core), `/proc/meminfo` (memory, swap, cache), `/proc/pressure/{cpu,memory,io}`, `/proc/loadavg`, `/proc/diskstats` and mounts, `/proc/net/dev`, `/sys/class/hwmon` (k10temp, nvme and others), NVML for NVIDIA GPUs (utilization, encoder and decoder utilization, memory, temperature, power), top processes by CPU and memory, uptime, systemd units deskport cares about.
-- Windows later: PDH counters and NVML.
+- Windows: NtQuerySystemInformation, GetPerformanceInfo, disk performance counters, GetIfTable2 and nvidia-smi.exe ([windows.md](windows.md), Metrics).
 - The hub keeps one hour at 5 s resolution in memory per host; SQLite for longer history only if the owner wants it.
 - Dashboard per machine: current values and short sparklines, built to DESIGN.md (Cloudflare-dashboard style).
 - Picker: list or grid, sort by name, status, CPU, memory, last seen or the owner's own order (drag), search by name, OS, tags and address. Order and view are stored on the hub per person, so they follow the owner across devices.
@@ -108,7 +108,7 @@ Moves happen in their own commits with no behaviour change, so history stays rea
 | 4 | **Fast screen path in the agent.** Mutter RemoteDesktop and ScreenCast, encoders, pointer, clipboard, separate desktop scale, images fallback. Behind a setting until the bench shows it at least as good as the current path everywhere. | Default for the separate desktop; then My monitor after the owner tries it. guacd removed when nothing uses it. | in progress: direct path for the separate desktop behind a setting (2026-11-13), not yet the default (decisions.md) |
 | 5 | **Updates and packaging.** Agent self-update offered by the hub (signed builds), uninstall, release builds for x86_64 and aarch64 Linux. | A version bump reaches every agent. | done (2026-11-13; aarch64 build not run on a real machine) |
 | 6 | **Direct links.** WebRTC over Tailscale or LAN with the hub relay as fallback. | Bench shows the gain on the tailnet. | planned |
-| 7 | **Windows agent.** Capture, encode, input, ConPTY terminal, metrics, Windows service. | A Windows machine joins and streams. | later |
+| 7 | **Windows agent.** Capture, encode, input, ConPTY terminal, metrics, Windows service. | A Windows machine joins and streams. | in progress (2026-11-16): metrics, ConPTY terminal, join, updates, a scheduled task at logon and uninstall build for x86_64 Windows and are unit-tested on Linux; nothing has run on Windows yet. Screen designed, not built ([windows.md](windows.md)) |
 
 ## Rules that still apply
 

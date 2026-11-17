@@ -1,7 +1,6 @@
-//! A metrics sample (docs/protocol.md, Metrics sample) from /proc, /sys and,
-//! when it is installed, nvidia-smi. Counters are cumulative; the hub
-//! computes rates. Only top processes need the previous sample.
+//! The Linux sample: /proc, /sys and, when it is installed, nvidia-smi.
 
+use super::{gpus, top_rows};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -18,7 +17,7 @@ impl Collector {
         Collector {
             prev_proc: HashMap::new(),
             prev_total: 0,
-            nvidia_smi: which("nvidia-smi"),
+            nvidia_smi: crate::sys::which("nvidia-smi"),
             page: unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(4096) as u64,
         }
     }
@@ -99,22 +98,12 @@ impl Collector {
         }
         self.prev_proc = now;
         self.prev_total = total;
-        rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        rows.into_iter()
-            .take(5)
-            .map(|(pct, pid, name, rss)| json!({ "pid": pid, "name": name, "cpuPct": (pct * 10.0).round() / 10.0, "rssB": rss }))
-            .collect()
+        top_rows(rows)
     }
 }
 
 fn read(p: &str) -> Option<String> {
     fs::read_to_string(p).ok()
-}
-
-fn which(cmd: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).any(|d| d.join(cmd).is_file()))
-        .unwrap_or(false)
 }
 
 /// (all cores, per core): user, nice, system, idle, iowait, irq, softirq, steal.
@@ -266,36 +255,6 @@ fn temps() -> Vec<Value> {
     out
 }
 
-fn gpus() -> Option<Vec<Value>> {
-    let out = std::process::Command::new("nvidia-smi")
-        .args([
-            "--query-gpu=name,utilization.gpu,utilization.encoder,utilization.decoder,memory.used,memory.total,temperature.gpu,power.draw",
-            "--format=csv,noheader,nounits",
-        ])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    Some(parse_nvidia_smi(&String::from_utf8_lossy(&out.stdout)))
-}
-
-pub fn parse_nvidia_smi(s: &str) -> Vec<Value> {
-    s.lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| {
-            let f: Vec<&str> = l.split(',').map(|x| x.trim()).collect();
-            let num = |i: usize| f.get(i).and_then(|v| v.parse::<f64>().ok());
-            let mib = |i: usize| num(i).map(|v| (v * 1024.0 * 1024.0) as u64);
-            json!({
-                "name": f.first().copied().unwrap_or(""),
-                "utilPct": num(1), "encoderPct": num(2), "decoderPct": num(3),
-                "memUsedB": mib(4), "memTotalB": mib(5), "c": num(6), "powerW": num(7),
-            })
-        })
-        .collect()
-}
-
 /// (name, utime + stime in ticks, resident pages) from /proc/<pid>/stat.
 pub fn parse_pid_stat(s: &str) -> Option<(String, u64, u64)> {
     let open = s.find('(')?;
@@ -341,9 +300,6 @@ mod tests {
         assert_eq!(n.len(), 1);
         assert_eq!(n[0]["rxB"], 100);
         assert_eq!(n[0]["txB"], 200);
-        let g = parse_nvidia_smi("NVIDIA GeForce GTX 1650 SUPER, 12, 3, 0, 512, 4096, 45, 20.50\n");
-        assert_eq!(g[0]["encoderPct"], 3.0);
-        assert_eq!(g[0]["memTotalB"], 4096u64 * 1024 * 1024);
         let p = parse_pid_stat("42 (tmux: server) S 1 42 42 0 -1 4194560 100 0 0 0 7 3 0 0 20 0 1 0 100 1000000 250 18446744073709551615").unwrap();
         assert_eq!(p, ("tmux: server".to_string(), 10, 250));
     }

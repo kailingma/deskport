@@ -1,18 +1,28 @@
-//! A `term` stream (docs/protocol.md): attaches to the persistent tmux session
-//! through a pseudo-terminal, with the messages of shim/terminal.js.
+//! A `term` stream (docs/protocol.md), with the messages of shim/terminal.js.
+//! On Linux it attaches to the persistent tmux session through a
+//! pseudo-terminal (unix.rs); on Windows to a shell in a pseudo console that
+//! outlives the connection (windows.rs).
 //!
 //! Browser -> agent: JSON {type:"input", data} | {type:"resize", cols, rows},
 //!   and with ?flow=1 {type:"ack", chars} (UTF-16 length) and {type:"ping", id}.
 //! Agent -> browser: output as text messages; binary messages holding JSON
 //!   {type:"pong", id} with ?flow=1.
 
+#[cfg_attr(not(windows), allow(dead_code))]
+mod fanout;
+#[cfg(not(windows))]
+mod unix;
+#[cfg(not(windows))]
+use unix as pty;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as pty;
+
+pub use pty::available;
+
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use std::fs::File;
-use std::io::{Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep_until};
@@ -22,64 +32,54 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
 const BATCH: Duration = Duration::from_millis(4);
 const PING: Duration = Duration::from_secs(25);
-const SECRET_PREFIXES: &[&str] = &["RDP_", "CF_ACCESS_", "DESKPORT_", "GUACD_"];
 
 fn flow_high() -> usize {
     std::env::var("DESKPORT_TERM_WINDOW").ok().and_then(|v| v.parse().ok()).unwrap_or(128 * 1024)
 }
 
-pub fn tmux_session() -> String {
-    std::env::var("DESKPORT_TMUX_SESSION").unwrap_or_else(|_| "web".into())
+/// Why a connection's output ended.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub enum End {
+    /// The terminal program exited.
+    Exited,
+    /// The connection fell too far behind the output and was let go; the
+    /// page reconnects and gets the recent output again.
+    Behind,
 }
 
-pub fn tmux_available() -> bool {
-    Command::new("tmux").arg("-V").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+/// One connection's view of a terminal.
+pub struct Attached {
+    /// Output as it comes. While nothing is taken from it, the terminal
+    /// program is slowed down (Linux) or the connection falls behind (Windows).
+    pub output: mpsc::Receiver<Vec<u8>>,
+    pub input: std::sync::mpsc::Sender<Vec<u8>>,
+    /// Output to show before anything new (Windows: the recent output).
+    pub replay: Vec<u8>,
+    /// For the log: what was attached.
+    pub label: String,
+    pub conn: pty::Conn,
 }
 
-struct Pty {
-    master: File,
-    child: Child,
+pub fn cwd() -> String {
+    std::env::var("DESKPORT_TERM_CWD").unwrap_or_else(|_| crate::sys::home().to_string_lossy().into_owned())
 }
 
-fn set_size(fd: i32, cols: u16, rows: u16) {
-    let ws = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
-    unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &ws) };
-}
-
-fn spawn_tmux(session: &str, cwd: &str) -> std::io::Result<Pty> {
-    let mut master: libc::c_int = -1;
-    let mut slave: libc::c_int = -1;
-    let ws = libc::winsize { ws_row: 30, ws_col: 100, ws_xpixel: 0, ws_ypixel: 0 };
-    if unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null(), &ws) } != 0 {
-        return Err(std::io::Error::last_os_error());
+/// A Windows environment block (UTF-16 `name=value` entries, each ending in
+/// NUL, sorted by name without case, then one more NUL) without the secrets.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn env_block(vars: impl Iterator<Item = (String, String)>) -> Vec<u16> {
+    let mut vars: Vec<(String, String)> = vars.filter(|(k, _)| !k.is_empty() && !crate::sys::is_secret(k)).collect();
+    vars.sort_by_key(|(k, _)| k.to_uppercase());
+    let mut out = Vec::new();
+    for (k, v) in vars {
+        out.extend(format!("{k}={v}").encode_utf16());
+        out.push(0);
     }
-    let master = unsafe { OwnedFd::from_raw_fd(master) };
-    let slave = unsafe { OwnedFd::from_raw_fd(slave) };
-    unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
-    let mut cmd = Command::new("tmux");
-    cmd.args(["new-session", "-A", "-s", session, "-c", cwd]).current_dir(cwd);
-    cmd.env_clear();
-    for (k, v) in std::env::vars_os() {
-        let ks = k.to_string_lossy();
-        if !SECRET_PREFIXES.iter().any(|p| ks.starts_with(p)) {
-            cmd.env(&k, &v);
-        }
+    out.push(0);
+    if out.len() == 1 {
+        out.push(0);
     }
-    cmd.env("TERM", "xterm-256color").env("COLORTERM", "truecolor");
-    cmd.stdin(Stdio::from(slave.try_clone()?)).stdout(Stdio::from(slave.try_clone()?)).stderr(Stdio::from(slave));
-    unsafe {
-        cmd.pre_exec(|| {
-            if libc::setsid() < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            if libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let child = cmd.spawn()?;
-    Ok(Pty { master: File::from(master), child })
+    out
 }
 
 /// Splits bytes into the valid UTF-8 text and the bytes of a character that is not complete yet.
@@ -116,57 +116,27 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let flow = query.trim_start_matches('?').split('&').any(|kv| kv == "flow=1");
-    let session = tmux_session();
-    let cwd = std::env::var("DESKPORT_TERM_CWD").unwrap_or_else(|_| crate::config::home().to_string_lossy().into_owned());
     let (mut tx, mut rx) = ws.split();
-    let mut pty = match spawn_tmux(&session, &cwd) {
-        Ok(p) => p,
+    let Attached { output: mut out_rx, input: in_tx, replay, label, conn } = match pty::attach(&cwd()) {
+        Ok(a) => a,
         Err(e) => {
-            eprintln!("terminal: tmux did not start: {e}");
-            let _ = tx.send(Message::Close(Some(CloseFrame { code: CloseCode::Error, reason: "tmux did not start".into() }))).await;
+            eprintln!("terminal: did not start: {e}");
+            let _ = tx.send(Message::Close(Some(CloseFrame { code: CloseCode::Error, reason: "the terminal did not start".into() }))).await;
             return;
         }
     };
-    eprintln!("terminal: attached to tmux session \"{session}\" (pid {}{})", pty.child.id(), if flow { ", flow control" } else { "" });
-    let fd = pty.master.as_raw_fd();
-
-    // The pseudo-terminal is read on its own thread. The channel holds a few
-    // chunks; while flow control pauses, nothing is taken from it, the thread
-    // blocks, and tmux sees a slow client.
-    let (out_tx, mut out_rx) = mpsc::channel::<Vec<u8>>(4);
-    let mut reader = pty.master.try_clone().expect("pty clone");
-    std::thread::spawn(move || {
-        let mut buf = vec![0u8; 16384];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if out_tx.blocking_send(buf[..n].to_vec()).is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-    let (in_tx, in_rx) = std::sync::mpsc::channel::<Vec<u8>>();
-    let mut writer = pty.master.try_clone().expect("pty clone");
-    std::thread::spawn(move || {
-        while let Ok(b) = in_rx.recv() {
-            if writer.write_all(&b).is_err() {
-                break;
-            }
-        }
-    });
+    eprintln!("terminal: attached to {label}{}", if flow { " (flow control)" } else { "" });
 
     let high = flow_high();
     let low = high / 2;
     let mut carry = Vec::new();
-    let mut pending = String::new();
-    let mut deadline: Option<Instant> = None;
+    let mut pending = decode(&mut carry, &replay);
+    let mut deadline: Option<Instant> = if pending.is_empty() { None } else { Some(Instant::now()) };
     let mut last_send = Instant::now() - BATCH;
     let mut unacked: usize = 0;
     let mut paused = false;
     let mut exited = false;
+    let mut end = End::Exited;
     let mut ping = tokio::time::interval_at(Instant::now() + PING, PING);
 
     loop {
@@ -178,7 +148,7 @@ where
                         if last_send.elapsed() >= BATCH { deadline = Some(Instant::now()); } else { deadline = Some(last_send + BATCH); }
                     }
                 }
-                None => exited = true,
+                None => { exited = true; end = conn.end(); }
             },
             _ = async { sleep_until(deadline.unwrap()).await }, if deadline.is_some() => {
                 deadline = None;
@@ -206,7 +176,7 @@ where
                     Some("resize") => {
                         let cols = v["cols"].as_i64().unwrap_or(100).clamp(2, 500) as u16;
                         let rows = v["rows"].as_i64().unwrap_or(30).clamp(2, 300) as u16;
-                        set_size(fd, cols, rows);
+                        conn.resize(cols, rows);
                     }
                     Some("ack") if flow => {
                         unacked = unacked.saturating_sub(v["chars"].as_f64().unwrap_or(0.0) as usize);
@@ -222,19 +192,30 @@ where
             _ = ping.tick() => { if tx.send(Message::Ping(Vec::new().into())).await.is_err() { break; } },
         }
         if exited && deadline.is_none() && pending.is_empty() {
-            eprintln!("terminal: tmux client exited");
-            let _ = tx.send(Message::Close(Some(CloseFrame { code: CloseCode::Normal, reason: "terminal exited".into() }))).await;
+            let (code, reason) = match end {
+                End::Exited => (CloseCode::Normal, "terminal exited"),
+                End::Behind => (CloseCode::Again, "fell behind the terminal's output"),
+            };
+            eprintln!("terminal: {reason}");
+            let _ = tx.send(Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
             break;
         }
     }
-    // Closing detaches the tmux client; the session keeps running.
-    let _ = pty.child.kill();
-    let _ = pty.child.wait();
+    conn.detach();
 }
 
 #[cfg(test)]
 mod tests {
-    use super::decode;
+    use super::{decode, env_block};
+
+    #[test]
+    fn environment_block() {
+        let vars = [("path", "C:\\x"), ("DESKPORT_TERM_SHELL", "cmd"), ("Apple", "1"), ("rdp_user", "u")].map(|(k, v)| (k.to_string(), v.to_string()));
+        let block = env_block(vars.into_iter());
+        let text = String::from_utf16(&block).unwrap();
+        assert_eq!(text, "Apple=1\0path=C:\\x\0\0");
+        assert_eq!(env_block(std::iter::empty()), vec![0, 0]);
+    }
 
     #[test]
     fn utf8_split_across_reads() {

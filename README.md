@@ -152,6 +152,14 @@ curl -fsSL https://<your hub>/agent/v1/install.sh | sh -s -- <join token>
 
 It downloads the agent for the machine, joins it to the hub, installs tmux if you agree, and starts the agent at boot. Without the token it asks for one.
 
+On Windows 10 1809 or later, in PowerShell as that user (not as administrator), after `npm run build:agent:windows` on the hub:
+
+```powershell
+$env:DESKPORT_JOIN_TOKEN='<join token>'; irm https://<your hub>/agent/v1/install.ps1 | iex
+```
+
+It installs the agent with a scheduled task that starts it at each logon; its terminal is PowerShell. The Windows agent has not yet been run on a real Windows machine ([docs/windows.md](docs/windows.md)).
+
 Configuration lives outside the repo in `~/.config/deskport/` (see [deskport.env.example](deskport.env.example)) and `~/.cloudflared/deskport.yml`.
 
 ## Documentation

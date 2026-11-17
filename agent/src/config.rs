@@ -1,12 +1,11 @@
 //! The agent's files: `agent.json` (hub URL, id, name) and `agent.key` (the
-//! Ed25519 private key seed, base64url, mode 600), in
-//! `$DESKPORT_AGENT_CONFIG_DIR`, else `$XDG_CONFIG_HOME/deskport-agent`, else
-//! `~/.config/deskport-agent`.
+//! Ed25519 private key seed, base64url, readable by this user only), in
+//! `$DESKPORT_AGENT_CONFIG_DIR`, else on Linux `$XDG_CONFIG_HOME/deskport-agent`
+//! or `~/.config/deskport-agent`, on Windows `%APPDATA%\deskport-agent`.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -24,14 +23,32 @@ pub fn dir() -> PathBuf {
     if let Some(d) = std::env::var_os("DESKPORT_AGENT_CONFIG_DIR") {
         return PathBuf::from(d);
     }
+    #[cfg(windows)]
+    if let Some(d) = std::env::var_os("APPDATA") {
+        return PathBuf::from(d).join("deskport-agent");
+    }
+    #[cfg(not(windows))]
     if let Some(d) = std::env::var_os("XDG_CONFIG_HOME") {
         return PathBuf::from(d).join("deskport-agent");
     }
-    home().join(".config").join("deskport-agent")
+    crate::sys::home().join(".config").join("deskport-agent")
 }
 
-pub fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+/// Opens `path` for writing, empty, so that only this user can read it
+/// (`private`) or with the usual permissions.
+#[cfg(not(windows))]
+fn create(path: &std::path::Path, private: bool) -> std::io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::OpenOptions::new().write(true).create(true).truncate(true).mode(if private { 0o600 } else { 0o644 }).open(path)
+}
+
+#[cfg(windows)]
+fn create(path: &std::path::Path, private: bool) -> std::io::Result<fs::File> {
+    let f = fs::OpenOptions::new().write(true).create(true).truncate(true).open(path)?;
+    if private {
+        crate::winsec::owner_only(path)?;
+    }
+    Ok(f)
 }
 
 pub fn load() -> Result<(Config, [u8; 32]), String> {
@@ -49,12 +66,14 @@ pub fn load() -> Result<(Config, [u8; 32]), String> {
 pub fn save(cfg: &Config, seed: &[u8; 32]) -> Result<(), String> {
     let d = dir();
     fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
-    let write = |name: &str, body: &str, mode: u32| -> Result<(), String> {
+    let write = |name: &str, body: &str, private: bool| -> Result<(), String> {
         let tmp = d.join(format!("{name}.tmp"));
-        let mut f = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(mode).open(&tmp).map_err(|e| format!("{name}: {e}"))?;
+        let _ = fs::remove_file(&tmp);
+        let mut f = create(&tmp, private).map_err(|e| format!("{name}: {e}"))?;
         f.write_all(body.as_bytes()).map_err(|e| format!("{name}: {e}"))?;
+        drop(f);
         fs::rename(&tmp, d.join(name)).map_err(|e| format!("{name}: {e}"))
     };
-    write("agent.key", &format!("{}\n", crate::protocol::b64(seed)), 0o600)?;
-    write("agent.json", &format!("{}\n", serde_json::to_string_pretty(cfg).unwrap()), 0o644)
+    write("agent.key", &format!("{}\n", crate::protocol::b64(seed)), true)?;
+    write("agent.json", &format!("{}\n", serde_json::to_string_pretty(cfg).unwrap()), false)
 }

@@ -340,14 +340,37 @@ export function createMachines({ open, toast, currentId, onList }) {
 
   const addDialog = $('add-machine');
   let expiryTimer = null;
+  let addToken = null;
+  let addOs = 'linux';
+  const ADD_OS = {
+    linux: {
+      where: 'On the machine, as the user the agent should run as, run:',
+      command: (origin, token) => `curl -fsSL ${origin}/agent/v1/install.sh | sh -s -- ${token}`,
+      needs: 'It needs curl, and tmux for its terminal. It installs deskport-agent as a systemd user service and shows up here when it connects.',
+    },
+    windows: {
+      where: 'On the machine, in PowerShell as the user the agent should run as (not as administrator), run:',
+      command: (origin, token) => `$env:DESKPORT_JOIN_TOKEN='${token}'; irm ${origin}/agent/v1/install.ps1 | iex`,
+      needs: 'It needs Windows 10 version 1809 or later. It installs deskport-agent with a scheduled task that starts it at each logon, and shows up here when it connects. Its terminal is PowerShell.',
+    },
+  };
+  function showAddCommand() {
+    const os = ADD_OS[addOs];
+    for (const b of addDialog.querySelectorAll('[data-add-os]')) b.setAttribute('aria-checked', String(b.dataset.addOs === addOs));
+    $('add-where').textContent = os.where;
+    $('add-needs').textContent = os.needs;
+    if (addToken) $('add-command').textContent = os.command(location.origin, addToken);
+  }
   async function addMachine() {
+    addToken = null;
+    showAddCommand();
     $('add-command').textContent = 'Making a join token.';
     $('add-expiry').textContent = '';
     addDialog.showModal();
     try {
       const { token, expiresAt } = await hub.json('/api/join-tokens', { method: 'POST' });
-      const origin = location.origin;
-      $('add-command').textContent = `curl -fsSL ${origin}/agent/v1/install.sh | sh -s -- ${token}`;
+      addToken = token;
+      showAddCommand();
       const tick = () => {
         const left = Math.round((expiresAt - Date.now()) / 60000);
         $('add-expiry').textContent = left > 0
@@ -364,6 +387,8 @@ export function createMachines({ open, toast, currentId, onList }) {
   addDialog.addEventListener('close', () => { clearInterval(expiryTimer); refresh(); });
   addDialog.addEventListener('click', async (e) => {
     if (e.target === addDialog) return addDialog.close();
+    const os = e.target.closest('[data-add-os]')?.dataset.addOs;
+    if (os) { addOs = os; showAddCommand(); }
     const action = e.target.closest('[data-add]')?.dataset.add;
     if (action === 'close') addDialog.close();
     if (action === 'copy') {
@@ -486,7 +511,9 @@ export function createMachines({ open, toast, currentId, onList }) {
         cards.push(cardBox('Memory',
           el('p', { class: 'md-big' }, bytes(used), el('span', { class: 'md-sub' }, ` of ${bytes(mem.totalB)}`)),
           chartRow(points, 'mem', 'In use', pct, 100),
-          el('p', { class: 'md-line' }, `Swap ${mem.swapTotalB ? `${bytes(swapUsed)} of ${bytes(mem.swapTotalB)}` : 'none'} · cache ${bytes(mem.cachedB)}`)));
+          el('p', { class: 'md-line' }, mem.commitLimitB
+            ? `Committed ${bytes(mem.commitB)} of ${bytes(mem.commitLimitB)} · cache ${bytes(mem.cachedB)}`
+            : `Swap ${mem.swapTotalB ? `${bytes(swapUsed)} of ${bytes(mem.swapTotalB)}` : 'none'} · cache ${bytes(mem.cachedB)}`)));
       }
 
       const pr = last.pressure;

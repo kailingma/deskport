@@ -4,14 +4,19 @@
 //!
 //!   deskport-agent join <hub url> <join token> [--name <name>]
 //!   deskport-agent run
+//!   deskport-agent service      (Windows: what the scheduled task runs)
 //!   deskport-agent uninstall
 //!   deskport-agent version
 
 mod config;
 mod metrics;
 mod protocol;
+mod runner;
+mod sys;
 mod terminal;
 mod update;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod winsec;
 
 use futures_util::{SinkExt, StreamExt};
 use protocol::{PREFIX, SUBPROTOCOL};
@@ -29,12 +34,9 @@ const SILENCE: Duration = Duration::from_secs(60);
 const REMOVED: &str = "this machine was removed from the hub";
 
 fn usage() -> ! {
-    eprintln!("usage: deskport-agent join <hub url> <join token> [--name <name>]\n       deskport-agent run\n       deskport-agent uninstall\n       deskport-agent version");
+    let service = if cfg!(windows) { "\n       deskport-agent service" } else { "" };
+    eprintln!("usage: deskport-agent join <hub url> <join token> [--name <name>]\n       deskport-agent run{service}\n       deskport-agent uninstall\n       deskport-agent version");
     std::process::exit(2);
-}
-
-fn hostname() -> String {
-    std::fs::read_to_string("/proc/sys/kernel/hostname").map(|s| s.trim().to_string()).unwrap_or_else(|_| "machine".into())
 }
 
 fn os_name() -> &'static str {
@@ -46,7 +48,7 @@ fn join(args: &[String]) -> Result<(), String> {
         [h, t, ..] => (h.trim_end_matches('/').to_string(), t.clone()),
         _ => usage(),
     };
-    let name = args.iter().position(|a| a == "--name").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(hostname);
+    let name = args.iter().position(|a| a == "--name").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(sys::hostname);
     if !(hub.starts_with("https://") || hub.starts_with("http://127.0.0.1") || hub.starts_with("http://localhost") || hub.starts_with("http://[::1]")) {
         return Err("the hub URL must be https:// (plain http only on loopback)".into());
     }
@@ -94,7 +96,7 @@ async fn control(cfg: &config::Config, seed: &[u8; 32], connected: &mut Option<I
     *connected = Some(Instant::now());
     let (mut tx, mut rx) = ws.split();
     let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let caps = json!({ "screen": null, "terminal": terminal::tmux_available(), "files": false, "metrics": true });
+    let caps = json!({ "screen": null, "terminal": terminal::available(), "files": false, "metrics": true });
     let hello = json!({ "type": "hello", "agent": { "version": VERSION, "os": os_name(), "arch": std::env::consts::ARCH, "name": cfg.name }, "capabilities": caps });
     tx.send(Message::text(hello.to_string())).await.map_err(|e| e.to_string())?;
 
@@ -211,6 +213,8 @@ fn main() {
     let result = match args.first().map(String::as_str) {
         Some("join") => join(&args[1..]),
         Some("run") => tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap().block_on(run()),
+        #[cfg(windows)]
+        Some("service") => runner::service(),
         Some("uninstall") => update::uninstall(),
         Some("version") | Some("--version") => {
             println!("deskport-agent {VERSION} (protocol {})", protocol::PROTOCOL);
@@ -220,7 +224,7 @@ fn main() {
     };
     if let Err(e) = result {
         eprintln!("deskport-agent: {e}");
-        // 3: removed from the hub; the systemd unit does not restart on it.
+        // 3: removed from the hub; the systemd unit and the Windows runner do not restart on it.
         std::process::exit(if e.starts_with(REMOVED) { 3 } else { 1 });
     }
 }

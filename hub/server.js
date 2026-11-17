@@ -80,7 +80,7 @@ app.post('/agent/v1/join', express.json({ limit: '8kb' }), (req, res) => {
     res.status(err.status).json({ error: err.message });
   }
 });
-// The install script, and the agent's build for a platform to anyone holding
+// The install scripts (Linux and Windows), and the agent's build for a platform to anyone holding
 // a join token that is still usable (scripts/install-agent.sh) or to a joined
 // agent that signs the request (updates, docs/protocol.md).
 // The script gets this hub's address filled in, so the one-liner needs only the token.
@@ -90,6 +90,13 @@ app.get('/agent/v1/install.sh', (req, res) => {
   const origin = hubOrigin(req);
   if (origin) script = script.replace('SERVED_BY="__DESKPORT_HUB__"', `SERVED_BY="${origin}"`);
   res.type('text/x-shellscript').send(script);
+});
+app.get('/agent/v1/install.ps1', (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  let script = fs.readFileSync(path.join(root, 'scripts/install-agent.ps1'), 'utf8');
+  const origin = hubOrigin(req);
+  if (origin) script = script.replace("$ServedBy = '__DESKPORT_HUB__'", `$ServedBy = '${origin}'`);
+  res.type('text/plain; charset=utf-8').send(script);
 });
 app.get('/agent/v1/download/:platform', (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -101,7 +108,7 @@ app.get('/agent/v1/download/:platform', (req, res) => {
   if (!allowed) return res.status(401).type('text/plain').send('A join token that is still usable is required.\n');
   const file = releases.fileFor(req.params.platform);
   if (!file) return res.status(404).type('text/plain').send(`No agent build for ${req.params.platform} on this hub (npm run build:agent).\n`);
-  res.type('application/octet-stream').sendFile(file);
+  res.type('application/octet-stream').sendFile(file, { dotfiles: 'allow' });
 });
 app.use('/agent', (req, res) => res.status(404).type('text/plain').send('Not Found'));
 
