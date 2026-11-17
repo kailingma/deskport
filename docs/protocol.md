@@ -33,6 +33,8 @@ Content-Type: application/json
   "publicKey": "<base64url of the 32-byte raw Ed25519 public key>" }
 ```
 
+`os` is `linux` or `windows` and `arch` is `x86_64` or `aarch64` (Rust's names for them); the hub treats both as opaque text and uses `<os>-<arch>` as the platform of updates.
+
 3. The hub answers `200 {"id": "<agent id>", "protocol": 1, "releaseKey": "<base64url raw Ed25519 public key>"}` and stores the public key under that id, `401 {"error": ...}` for an unknown, used or expired token, or `400 {"error": ...}` for a missing name or a bad key. The token is used up by any answer but 400. The id is a slug of the name, made unique by the hub (`a-z`, `0-9`, `-`, at most 63 characters, never `local`).
 
 `POST /agent/v1/join` is the only plain HTTP request under `/agent/`; the token is its authentication. Removing a machine in the hub (`DELETE /api/hosts/<id>`, same origin) deletes its key; its control socket is closed with 4001, after which the agent stops reconnecting, and later connections are refused.
@@ -121,7 +123,7 @@ Sent as `metrics.sample`. Every field is optional; an agent sends what its platf
 {
   "uptimeS": 1234,
   "cpu": { "total": [user, nice, system, idle, iowait, irq, softirq, steal], "cores": [[...], ...], "load": [1.2, 0.8, 0.5] },
-  "memory": { "totalB": 0, "availableB": 0, "cachedB": 0, "swapTotalB": 0, "swapFreeB": 0 },
+  "memory": { "totalB": 0, "availableB": 0, "cachedB": 0, "swapTotalB": 0, "swapFreeB": 0, "commitB": 0, "commitLimitB": 0 },
   "pressure": { "cpu": {"some10": 0.0}, "memory": {"some10": 0.0, "full10": 0.0}, "io": {"some10": 0.0, "full10": 0.0} },
   "disks": [ { "name": "nvme0n1", "readB": 0, "writeB": 0, "busyMs": 0 } ],
   "mounts": [ { "path": "/", "totalB": 0, "freeB": 0 } ],
@@ -135,9 +137,12 @@ Sent as `metrics.sample`. Every field is optional; an agent sends what its platf
 
 CPU times are in clock ticks as `/proc/stat` gives them (Windows agents convert to the same 100 Hz scale). Byte counts are bytes. Temperatures are degrees Celsius.
 
+What a Windows agent sends: `cpu.total` and `cpu.cores` as user, 0, system (kernel time less idle, DPC and interrupt time), idle, 0, interrupt, DPC, 0; no `load`. `memory` has `commitB` and `commitLimitB` (committed memory and the commit limit) instead of `swapTotalB` and `swapFreeB`. `disks` are `PhysicalDrive<n>`, with `busyMs` as uptime less the disk's idle time, which grows by the busy time between samples. `mounts` are fixed drives (`C:\`). `net` names are the adapters' aliases (`Ethernet`, `Wi-Fi`). No `pressure`, `temps` or `units`.
+
 ## Changes
 
 | Version | Date | Change |
 | --- | --- | --- |
 | 1 | 2026-11-12 | First version. |
 | 1 | 2026-11-13 | Added within version 1 (unknown fields and types are ignored): `releaseKey` in the join answer, the `update` message, signed GETs of `/agent/v1/download/`. |
+| 1 | 2026-11-16 | Added within version 1: `os: "windows"`, the platform `windows-x86_64`, `memory.commitB` and `memory.commitLimitB`. |
