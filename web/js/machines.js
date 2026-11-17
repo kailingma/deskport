@@ -562,8 +562,13 @@ export function createMachines({ open, toast, currentId, onList }) {
       }
     }
 
+    // Rebuilding once a second must not move the page: keep the scroll position
+    // of the view, and focus the control again without scrolling it into view.
+    const scroller = detailEl.closest('.machines');
+    const scrollTop = scroller?.scrollTop ?? 0;
     detailEl.replaceChildren(head, el('div', { class: 'md-grid' }, ...cards));
-    if (focus) detailEl.querySelector(`[data-focus-key="${focus}"]`)?.focus();
+    if (scroller) scroller.scrollTop = scrollTop;
+    if (focus) detailEl.querySelector(`[data-focus-key="${focus}"]`)?.focus({ preventScroll: true });
   }
 
   function svgUse(id) {
