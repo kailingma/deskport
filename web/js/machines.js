@@ -238,8 +238,8 @@ export function createMachines({ open, toast, currentId, onList }) {
         el('div', { class: 'mc-figure' }, el('span', { class: 'mc-figure-label' }, 'Processor'), el('span', { class: 'mc-figure-value' }, pct(m.cpuPct)), meter(m.cpuPct, `${m.name} processor use`)),
         el('div', { class: 'mc-figure' }, el('span', { class: 'mc-figure-label' }, 'Memory'), el('span', { class: 'mc-figure-value' }, pct(m.memPct)), meter(m.memPct, `${m.name} memory use`))),
       el('div', { class: 'mc-actions' },
-        m.screen && el('button', { class: 'btn-text', type: 'button', dataset: { open: 'screen' } }, 'Screen'),
-        m.terminal && el('button', { class: 'btn-text', type: 'button', dataset: { open: 'term' } }, 'Terminal')));
+        m.screen && el('button', { class: 'btn-text btn-open', type: 'button', dataset: { open: 'screen' } }, svgUse('i-monitor'), 'Screen'),
+        m.terminal && el('button', { class: 'btn-text btn-open', type: 'button', dataset: { open: 'term' } }, svgUse('i-terminal'), 'Terminal')));
   }
 
   function render() {
@@ -459,8 +459,8 @@ export function createMachines({ open, toast, currentId, onList }) {
         el('span', { class: 'mc-meta' }, [m.local ? 'This computer' : null, [m.os, m.arch].filter(Boolean).join(' '), uptime(last?.uptimeS)].filter(Boolean).join(' · '))),
       statusBadge(m),
       el('div', { class: 'md-actions' },
-        m.screen && el('button', { class: 'btn-text', type: 'button', dataset: { open: 'screen', focusKey: 'screen' } }, 'Screen'),
-        m.terminal && el('button', { class: 'btn-text', type: 'button', dataset: { open: 'term', focusKey: 'term' } }, 'Terminal'),
+        m.screen && el('button', { class: 'btn-text btn-open', type: 'button', dataset: { open: 'screen', focusKey: 'screen' } }, svgUse('i-monitor'), 'Screen'),
+        m.terminal && el('button', { class: 'btn-text btn-open', type: 'button', dataset: { open: 'term', focusKey: 'term' } }, svgUse('i-terminal'), 'Terminal'),
         !m.local && el('button', { class: 'btn-text md-remove admin-only', type: 'button', dataset: { focusKey: 'remove' } }, 'Remove')));
 
     const cards = [];
