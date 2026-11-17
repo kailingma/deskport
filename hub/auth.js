@@ -29,7 +29,9 @@ export function createAuthenticator({ insecureDev, access }) {
     try {
       ({ payload } = await jwtVerify(token, jwks, { issuer, audience: access.aud }));
     } catch (err) {
-      throw new AuthError(`invalid Cloudflare Access token: ${err.code || err.message}`);
+      // A generic error is usually the key set fetch failing, e.g. a renamed team domain.
+      const why = err.code && err.code !== 'ERR_JOSE_GENERIC' ? err.code : `${err.message} (keys from ${issuer}/cdn-cgi/access/certs)`;
+      throw new AuthError(`invalid Cloudflare Access token: ${why}`);
     }
 
     const email = String(payload.email || '').toLowerCase();
