@@ -9,16 +9,15 @@ What it does today: the control socket, metrics, and the terminal (tmux). It has
 On the hub: build the agent (`npm run build:agent`, needs Rust) and mint a join token (see [setup.md](setup.md), step 9). On the machine:
 
 ```bash
-curl -fsSL https://<hub>/agent/v1/install.sh | sh -s -- https://<hub> <join token> [--name "<name>"]
+curl -fsSL https://<hub>/agent/v1/install.sh | sh -s -- <join token> [--name "<name>"] [--rejoin] [--no-tmux]
 ```
 
-`scripts/install-agent.sh` does the same from a checkout, with `--binary <path>` to skip the download. It:
+The hub writes its own address into the script it serves (from the request's `Host`; `hubOrigin()` in `hub/hosts.js`). `scripts/install-agent.sh <hub url> <join token>` does the same from a checkout, with `--binary <path>` to skip the download. Without a token it asks on the terminal, or takes `DESKPORT_JOIN_TOKEN`. It:
 
-1. downloads the build for this machine (`/agent/v1/download/linux-x86_64`, which needs the join token in an `Authorization: Bearer` header) into `~/.local/bin/deskport-agent`,
+1. downloads the build for this machine (`/agent/v1/download/linux-x86_64` or `linux-aarch64`, which needs the join token in an `Authorization: Bearer` header) into `~/.local/bin/deskport-agent`; on a machine that has `agent.json` and `agent.key` already, it keeps the binary (the agent updates itself) and skips joining unless `--rejoin`,
 2. runs `deskport-agent join`, which makes the machine's Ed25519 key and registers its public key with the hub,
-3. writes and starts the systemd user unit `deskport-agent.service`, and prints the `loginctl enable-linger` command if the agent would stop at logout.
-
-Without a systemd user session (a container, for example) it prints the command to start the agent instead.
+3. offers to install tmux with apt, dnf, yum, pacman, zypper or apk (with sudo after asking; as root without asking),
+4. writes and starts the systemd user unit `deskport-agent.service`, and prints the `loginctl enable-linger` command if the agent would stop at logout. Without a systemd user session (a container, a minimal server) it writes `~/.local/bin/deskport-agent-loop`, which restarts the agent like the unit would and stops on exit status 3, starts it in the background with its log in the settings directory, and adds a crontab `@reboot` entry for it.
 
 ## Commands
 

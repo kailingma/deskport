@@ -139,10 +139,18 @@ Other machines join this one, the hub, with deskport-agent ([agent.md](agent.md)
 Then, for each machine, open Machines in the page and choose Add machine. It shows a command with a join token that works once, within 15 minutes:
 
 ```bash
-curl -fsSL https://desk.example.com/agent/v1/install.sh | sh -s -- https://desk.example.com <join token>
+curl -fsSL https://desk.example.com/agent/v1/install.sh | sh -s -- <join token>
 ```
 
-The machine needs `curl`, and `tmux` for its terminal. It appears under Machines when it connects.
+Run it on the machine as the user the agent should run as (its terminal is that user's shell). Leave out the token and the script asks for it. The script:
+
+- downloads the build for the machine's architecture (x86_64, or aarch64 after `npm run build:agent:aarch64` on the hub),
+- joins the hub, or on a machine that already joined keeps that and only restarts the agent (`--rejoin` joins again),
+- offers to install `tmux` with the machine's package manager (apt, dnf, yum, pacman, zypper or apk), which the terminal needs,
+- keeps the agent running: a systemd user unit, or where there is no systemd user session a restart loop started now and from a crontab `@reboot` entry,
+- prints the `loginctl enable-linger` command if the agent would otherwise stop at logout.
+
+Other options: `--name <name>` (default: the hostname) and `--no-tmux`. `DESKPORT_JOIN_TOKEN` can carry the token instead, for unattended installs. The machine appears under Machines when it connects. macOS is not supported.
 
 ## Troubleshooting
 

@@ -347,7 +347,7 @@ export function createMachines({ open, toast, currentId, onList }) {
     try {
       const { token, expiresAt } = await hub.json('/api/join-tokens', { method: 'POST' });
       const origin = location.origin;
-      $('add-command').textContent = `curl -fsSL ${origin}/agent/v1/install.sh | sh -s -- ${origin} ${token}`;
+      $('add-command').textContent = `curl -fsSL ${origin}/agent/v1/install.sh | sh -s -- ${token}`;
       const tick = () => {
         const left = Math.round((expiresAt - Date.now()) / 60000);
         $('add-expiry').textContent = left > 0

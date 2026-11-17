@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHostRegistry, routeFor, slugify, LOCAL } from '../hub/hosts.js';
+import { createHostRegistry, routeFor, slugify, LOCAL, hubOrigin } from '../hub/hosts.js';
 
 test('routeFor splits host-addressed paths', () => {
   assert.deepEqual(routeFor('/ws/screen'), { hostId: LOCAL, path: '/ws/screen' });
@@ -39,4 +39,15 @@ test('the registry serves itself and lists other hosts as not implemented', () =
   assert.equal(hosts.describe().capabilities.screen.sources[0], 'mirror');
   assert.equal(logs.filter((m) => m.includes('skipping')).length, 2);
   fs.rmSync(dir, { recursive: true });
+});
+
+test('hubOrigin: https for names, http for loopback, nothing for odd Host headers', () => {
+  const o = (host) => hubOrigin({ headers: { host } });
+  assert.equal(o('desk.example.com'), 'https://desk.example.com');
+  assert.equal(o('127.0.0.1:7900'), 'http://127.0.0.1:7900');
+  assert.equal(o('localhost:7901'), 'http://localhost:7901');
+  assert.equal(o('[::1]:7900'), 'http://[::1]:7900');
+  assert.equal(o('a"; rm -rf ~; "b'), null);
+  assert.equal(o('x.com/$(id)'), null);
+  assert.equal(o(undefined), null);
 });

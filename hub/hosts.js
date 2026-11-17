@@ -96,3 +96,15 @@ export function createHostRegistry({ config, sources, version, log }) {
     },
   };
 }
+
+/**
+ * This hub's address as the browser or curl reached it, from the Host header,
+ * or null when the header is not a plain host name or address (it is written
+ * into the install script).
+ */
+export function hubOrigin(req) {
+  const host = String(req.headers.host || '');
+  if (!/^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(?::\d{1,5})?$/.test(host)) return null;
+  const loopback = /^(?:localhost|127\.\d+\.\d+\.\d+|\[::1\])(?::\d+)?$/.test(host);
+  return `${loopback ? 'http' : 'https'}://${host}`;
+}

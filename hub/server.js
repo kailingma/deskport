@@ -9,7 +9,7 @@ import { createAuthenticator, AuthError, sameOrigin } from './auth.js';
 import { spawn } from 'node:child_process';
 import { SCREEN_SOURCES } from '../shim/guac.js';
 import { createLocalHost } from '../shim/host.js';
-import { createHostRegistry, routeFor } from './hosts.js';
+import { createHostRegistry, routeFor, hubOrigin } from './hosts.js';
 import { createApi } from './api.js';
 import { createUi } from './ui.js';
 import { createAgentHub } from './agents.js';
@@ -83,9 +83,13 @@ app.post('/agent/v1/join', express.json({ limit: '8kb' }), (req, res) => {
 // The install script, and the agent's build for a platform to anyone holding
 // a join token that is still usable (scripts/install-agent.sh) or to a joined
 // agent that signs the request (updates, docs/protocol.md).
+// The script gets this hub's address filled in, so the one-liner needs only the token.
 app.get('/agent/v1/install.sh', (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-  res.type('text/x-shellscript').sendFile(path.join(root, 'scripts/install-agent.sh'));
+  let script = fs.readFileSync(path.join(root, 'scripts/install-agent.sh'), 'utf8');
+  const origin = hubOrigin(req);
+  if (origin) script = script.replace('SERVED_BY="__DESKPORT_HUB__"', `SERVED_BY="${origin}"`);
+  res.type('text/x-shellscript').send(script);
 });
 app.get('/agent/v1/download/:platform', (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });

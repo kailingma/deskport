@@ -142,6 +142,16 @@ npm run dev                                         # try it at http://127.0.0.1
 ./scripts/install-services.sh                       # systemd user services
 ```
 
+### Add another machine
+
+On the hub, open Machines, Add machine for a join token (it works once, for 15 minutes; Cloudflare needs the `/agent/*` Bypass application from [docs/setup.md](docs/setup.md), step 9). Then on the other machine, as the user the agent should run as:
+
+```bash
+curl -fsSL https://<your hub>/agent/v1/install.sh | sh -s -- <join token>
+```
+
+It downloads the agent for the machine, joins it to the hub, installs tmux if you agree, and starts the agent at boot. Without the token it asks for one.
+
 Configuration lives outside the repo in `~/.config/deskport/` (see [deskport.env.example](deskport.env.example)) and `~/.cloudflared/deskport.yml`.
 
 ## Documentation
