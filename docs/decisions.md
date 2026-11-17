@@ -2,6 +2,14 @@
 
 Choices made while building deskport, newest first, with the reason for each. Entries marked *autonomous* were made while the owner was away and asked for choices to be made and logged.
 
+## 2026-11-16
+
+### Machines per person, admins from the environment
+The owner asked for computers limited to certain users, set in an admin interface, with admins chosen in the environment "or however you'd like". Admins are `DESKPORT_ADMIN_EMAILS`; when it is empty, everyone in `DESKPORT_ALLOWED_EMAILS` is an admin, so an existing setup keeps full access with no change. People and their machines live in `access.json`, edited from a People dialog in the Machines view, not in the environment, so giving someone a machine needs no restart. Someone on that list may sign in even if `DESKPORT_ALLOWED_EMAILS` leaves them out, so an admin adds a person in one place (plus the Access policy, which deskport cannot change). Access is per machine only, allow or deny; no view-only or terminal-only roles yet. Cloudflare Access cannot do this part: every machine sits behind the hub's one domain. Tested with unit tests over the API and against a server signed in as a non-admin (`DESKPORT_DEV_EMAIL`); closing a live stream when access is removed is covered by code only, not run end to end.
+
+### Cloudflare Access team renamed
+Sign-ins failed with `ERR_JOSE_GENERIC` after the owner changed the Zero Trust team domain: the old domain's `/cdn-cgi/access/certs` returns 404. `CF_ACCESS_TEAM_DOMAIN` was changed on this machine; the AUD tag stayed the same. The log now names the key URL when a check fails this way.
+
 ## 2026-11-14
 
 ### My monitor while the screen is locked

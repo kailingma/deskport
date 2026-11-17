@@ -22,6 +22,9 @@ export const config = {
   host: env.DESKPORT_HOST || '127.0.0.1',
   port: Number(env.DESKPORT_PORT || 7900),
   insecureDev: env.DESKPORT_INSECURE_DEV === '1',
+  // With DESKPORT_INSECURE_DEV=1, who the page is signed in as. Unset, that is
+  // dev@localhost and an admin; set, the admin lists and access.json apply.
+  devEmail: (env.DESKPORT_DEV_EMAIL || '').trim().toLowerCase(),
 
   // This machine in a multi-host setup (docs/multi-host.md). The id appears in
   // /h/<id>/ paths, so it is a slug; the name is what a UI shows.
@@ -39,6 +42,8 @@ export const config = {
   hostsFile: path.join(configDir, 'hosts.json'),
   // Machines that joined this hub (hub/registry.js).
   agentsFile: env.DESKPORT_AGENTS_FILE || path.join(configDir, 'agents.json'),
+  // Who may use which machine (hub/access.js), written by the admin page.
+  accessFile: env.DESKPORT_ACCESS_FILE || path.join(configDir, 'access.json'),
   // Per-person preferences (hub/prefs.js).
   prefsFile: env.DESKPORT_PREFS_FILE || path.join(configDir, 'prefs.json'),
   // The key agent builds are signed with (hub/releases.js).
@@ -50,6 +55,9 @@ export const config = {
     // The Application Audience (AUD) tag from the Access application
     aud: env.CF_ACCESS_AUD || '',
     allowedEmails: list(env.DESKPORT_ALLOWED_EMAILS),
+    // Admins use every machine and manage people, machines and join tokens.
+    // Empty: everyone in DESKPORT_ALLOWED_EMAILS (hub/access.js).
+    adminEmails: list(env.DESKPORT_ADMIN_EMAILS),
   },
 
   guacd: {

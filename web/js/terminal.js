@@ -422,10 +422,16 @@ export function createTerminal({ host, setStatus, toast }) {
       if (typeof e.data === 'string') onOutput(e.data);
       else onControl(e.data);
     };
-    socket.onclose = () => {
+    socket.onclose = (e) => {
       if (ws !== socket) return;
       ws = null;
       stopTimers();
+      // The hub closes with 4003 when an admin took this machine away.
+      if (e.code === 4003) {
+        setStatus('term', 'bad', 'No access');
+        toast('You no longer have this machine. Ask an admin.');
+        return;
+      }
       // The first retry is immediate; later ones back off up to 10 s.
       const delay = retry ? Math.min(10000, 250 * 2 ** retry) : 0;
       retry++;
@@ -470,6 +476,14 @@ export function createTerminal({ host, setStatus, toast }) {
       if (opened) xterm.reset();
       setStatus('term', 'idle', 'Idle');
       if (wasOpen) { retry = 0; connect(); }
+    },
+    /** No machine to show: closes the connection and stops retrying. */
+    stop() {
+      if (ws) { const old = ws; ws = null; old.onclose = null; old.close(); }
+      clearTimeout(retryTimer);
+      retryTimer = null;
+      stopTimers();
+      setStatus('term', 'idle', 'No machine');
     },
     paste,
     focus() { xterm.focus(); },

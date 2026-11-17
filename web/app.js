@@ -5,6 +5,7 @@ import { createScreen } from './js/screen.js';
 import { createTerminal } from './js/terminal.js';
 import { localHost, hub } from './js/host.js';
 import { createMachines } from './js/machines.js';
+import { createPeople } from './js/people.js';
 import { ask } from './js/dialog.js';
 
 const $ = (id) => document.getElementById(id);
@@ -73,6 +74,7 @@ function showMachineName() {
 
 hub.json('/api/me').then((data) => {
   me = data;
+  document.body.classList.toggle('is-admin', Boolean(data.admin));
   showMachineName();
 }).catch(() => {});
 
@@ -81,6 +83,7 @@ const term = createTerminal({ host, setStatus, toast });
 
 /** Points Screen and Terminal at another machine, reconnecting what was connected. */
 function useMachine(m, { quiet = false } = {}) {
+  noMachines = false;
   const same = m.id === machine.id || (m.local && machine.local);
   machine = { id: m.local ? 'local' : m.id, name: m.name, local: Boolean(m.local), screen: Boolean(m.screen), terminal: m.terminal !== false };
   try { localStorage.setItem('deskport.host', machine.local ? 'local' : machine.id); } catch {}
@@ -114,10 +117,12 @@ const machines = createMachines({
       const online = list.filter((m) => m.status === 'online').length;
       setStatus('machines', 'ok', `${online} of ${list.length} online`);
     }
-    // The shown machine was removed: back to the hub's own.
-    if (!err && !machine.local && !list.some((m) => m.id === machine.id)) {
-      const self = list.find((m) => m.local);
-      if (self) useMachine(self);
+    // The shown machine was removed or taken away: the hub's own, else the
+    // first one this person has, else none.
+    if (!err && !list.some((m) => (machine.local ? m.local : m.id === machine.id))) {
+      const next = list.find((m) => m.local) || list[0];
+      if (next) useMachine(next);
+      else showNoMachines();
     } else if (!err) {
       const cur = list.find((m) => (machine.local ? m.local : m.id === machine.id));
       if (cur && (cur.name !== machine.name || cur.screen !== machine.screen)) useMachine(cur, { quiet: true });
@@ -125,9 +130,26 @@ const machines = createMachines({
   },
 });
 
+const people = createPeople({ toast });
+$('people-open').addEventListener('click', () => people.open());
+
+/** Someone with no machines: Screen and Terminal stay closed, Machines says why. */
+let noMachines = false;
+function showNoMachines() {
+  if (noMachines) return;
+  noMachines = true;
+  screen.stop();
+  term.stop();
+  showView('machines');
+}
+
 // ---------- views ----------
 
 function showView(next) {
+  if (noMachines && next !== 'machines') {
+    toast('No machines have been given to you yet');
+    next = 'machines';
+  }
   view = next;
   document.body.dataset.view = next;
   for (const tab of document.querySelectorAll('button[data-view]')) {
@@ -624,9 +646,17 @@ let savedHost = 'local';
 try {
   const v = localStorage.getItem('deskport.view');
   initial = v === 'term' || v === 'machines' ? v : 'screen';
-  savedHost = localStorage.getItem('deskport.host') || 'local';
+  // Nothing saved (a first visit): wait for the list, since the hub's own
+  // machine may not be one this person was given.
+  savedHost = localStorage.getItem('deskport.host');
 } catch {}
-if (savedHost === 'local' || initial === 'machines') {
+if (savedHost === null) {
+  hub.json('/api/hosts').then((list) => {
+    const m = list.find((x) => x.local) || list[0];
+    if (m) useMachine(m, { quiet: true });
+    else showNoMachines();
+  }).catch(() => {}).finally(() => { if (!noMachines) showView(initial); });
+} else if (savedHost === 'local' || initial === 'machines') {
   showView(initial);
   if (savedHost !== 'local') hub.json('/api/hosts').then((list) => { const m = list.find((x) => x.id === savedHost && !x.local); if (m) useMachine(m, { quiet: true }); }).catch(() => {});
 } else {

@@ -135,7 +135,8 @@
           <button type="button" role="radio" data-machine-view="list">List</button>
           <button type="button" role="radio" data-machine-view="grid">Grid</button>
         </div>
-        <button class="btn-primary" id="add-machine-open" type="button">Add machine</button>
+        <button class="btn-secondary admin-only" id="people-open" type="button">People</button>
+        <button class="btn-primary admin-only" id="add-machine-open" type="button">Add machine</button>
       </div>
       <div class="machine-list" id="machine-list" data-layout="list"></div>
       <p class="machine-empty" id="machine-empty">Loading.</p>
@@ -398,6 +399,21 @@
       <div class="dialog-actions">
         <button class="btn-text" type="button" data-add="copy">Copy</button>
         <button class="btn-primary" type="button" data-add="close">Done</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="confirm people" id="people" aria-labelledby="people-title">
+    <div class="dialog-card">
+      <h2 class="dialog-title" id="people-title">People</h2>
+      <p class="dialog-body">Admins use every machine. Everyone else uses only the machines ticked for them. Cloudflare Access must also let them sign in.</p>
+      <form class="people-add" id="people-add">
+        <input class="input" id="people-email" type="email" placeholder="name@example.com" aria-label="Email address to add" autocomplete="off" spellcheck="false" required>
+        <button class="btn-primary" type="submit">Add</button>
+      </form>
+      <div class="people-list" id="people-list"></div>
+      <div class="dialog-actions">
+        <button class="btn-primary" type="button" data-people="close">Done</button>
       </div>
     </div>
   </dialog>

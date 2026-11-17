@@ -756,7 +756,9 @@ body[data-view="machines"] .keyrow { display: none !important; }
 .input:hover { border-color: var(--border-strong); }
 .machine-search { flex: 1 1 200px; min-width: 0; }
 .machine-tools .select { min-width: 0; flex: 0 1 180px; }
-.machine-tools .btn-primary { margin-left: auto; }
+#people-open { margin-left: auto; }
+/* People, Add machine and Remove are for admins; /api/me says who is one. */
+body:not(.is-admin) .admin-only { display: none !important; }
 @media (pointer: coarse) { .input, .machine-tools .select { height: 40px; font-size: 16px; } }
 
 .machine-list { max-width: 1200px; margin: 0 auto; }
@@ -916,3 +918,22 @@ body.no-screen .screen-only { display: none; }
 @media (max-width: 760px) {
   .machine-list[data-layout="list"] .mc-grip { align-self: start; margin-top: 4px; }
 }
+
+/* ---------- People (admins): who may use which machine ---------- */
+
+.people { width: min(560px, calc(100% - 32px)); }
+.people .dialog-card { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; }
+.people-add { display: flex; gap: 8px; margin-top: 12px; }
+.people-add .input { flex: 1 1 auto; min-width: 0; }
+.people-list { overflow-y: auto; margin-top: 12px; border-top: 1px solid var(--border); }
+.pp-person { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.pp-head { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.pp-email { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.pp-tag { padding: 2px 8px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font-size: 12px; font-weight: 500; }
+.pp-note { margin: 2px 0 0; color: var(--text-2); font-size: 12px; }
+.pp-machines { display: grid; gap: 2px; margin-top: 4px; }
+.pp-check { display: flex; align-items: center; gap: 10px; min-height: 32px; cursor: pointer; }
+.pp-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
+.pp-check:has(input:disabled) { color: var(--text-2); cursor: default; }
+.pp-check:first-child { font-weight: 500; }
+@media (pointer: coarse) { .pp-check { min-height: 44px; } }

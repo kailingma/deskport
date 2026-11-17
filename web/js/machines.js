@@ -182,6 +182,7 @@ export function createMachines({ open, toast, currentId, onList }) {
   const search = $('machine-search');
   const sortSel = $('machine-sort');
   let machines = [];
+  let loaded = false;
   let prefs = { order: [], view: 'list', sort: 'own' };
   let detail = null; // { id, samples }
   let listTimer = null;
@@ -248,13 +249,15 @@ export function createMachines({ open, toast, currentId, onList }) {
     const items = sorted();
     listEl.replaceChildren(...items.map(card));
     $('machine-empty').hidden = items.length > 0;
-    $('machine-empty').textContent = machines.length ? 'No machine matches the search.' : 'Loading.';
+    $('machine-empty').textContent = machines.length ? 'No machine matches the search.'
+      : loaded ? 'No machines have been given to you yet. Ask an admin of this hub.' : 'Loading.';
     if (detail) renderDetail();
   }
 
   async function refresh() {
     try {
       machines = await hub.json('/api/hosts');
+      loaded = true;
       onList?.(machines, null);
     } catch (err) {
       onList?.(machines, err);
@@ -458,7 +461,7 @@ export function createMachines({ open, toast, currentId, onList }) {
       el('div', { class: 'md-actions' },
         m.screen && el('button', { class: 'btn-text', type: 'button', dataset: { open: 'screen', focusKey: 'screen' } }, 'Screen'),
         m.terminal && el('button', { class: 'btn-text', type: 'button', dataset: { open: 'term', focusKey: 'term' } }, 'Terminal'),
-        !m.local && el('button', { class: 'btn-text md-remove', type: 'button', dataset: { focusKey: 'remove' } }, 'Remove')));
+        !m.local && el('button', { class: 'btn-text md-remove admin-only', type: 'button', dataset: { focusKey: 'remove' } }, 'Remove')));
 
     const cards = [];
     if (!last) {

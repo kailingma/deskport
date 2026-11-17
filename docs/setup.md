@@ -99,7 +99,7 @@ cp deskport.env.example ~/.config/deskport/deskport.env
 chmod 600 ~/.config/deskport/deskport.env
 ```
 
-Fill in `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, and optionally `DESKPORT_ALLOWED_EMAILS` (a second check on top of the Access policy).
+Fill in `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, and optionally `DESKPORT_ALLOWED_EMAILS` (a second check on top of the Access policy) and `DESKPORT_ADMIN_EMAILS` (who manages the hub; empty means everyone in `DESKPORT_ALLOWED_EMAILS`). Other people get machines under Machines, People in the page; add them to the Access application's policy too, or Cloudflare stops them before deskport sees them. If you rename the Zero Trust team, change `CF_ACCESS_TEAM_DOMAIN` too: the old domain's keys stop being served and every sign-in fails.
 
 ## 7. Run it as services
 

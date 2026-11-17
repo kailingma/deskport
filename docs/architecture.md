@@ -76,13 +76,23 @@ Every HTTP request and every WebSocket upgrade passes through `createAuthenticat
 
 1. The token comes from the `Cf-Access-Jwt-Assertion` header that Access adds, or the `CF_Authorization` cookie.
 2. `jose` verifies its signature against the team's JWKS at `https://<team>/cdn-cgi/access/certs` (fetched and cached), and checks that the issuer is `https://<team>` and that the audience is the application's AUD tag.
-3. If `DESKPORT_ALLOWED_EMAILS` is set, the token's `email` claim must be in it.
+3. The token's `email` must be allowed in (`mayEnter()` in `hub/access.js`): an admin, in `DESKPORT_ALLOWED_EMAILS`, or on the People list. When neither list is set, every identity Access lets through is allowed in, as an admin.
 
 A request that fails gets a 403 and a log line saying why. This check matters even behind Access: it stops anything else on the machine, or a misrouted tunnel, from reaching the screen without a token Cloudflare signed for this application.
 
 WebSocket upgrades also need an `Origin` whose host equals the `Host` header, so a page on another site cannot open the sockets with the user's cookie.
 
-`DESKPORT_INSECURE_DEV=1` (set by `npm run dev`) skips the token check and labels the session as dev. The server refuses to start on a non-loopback address in any mode.
+## Who may use which machine
+
+`hub/access.js`. Admins are `DESKPORT_ADMIN_EMAILS`, or everyone in `DESKPORT_ALLOWED_EMAILS` when that is empty. They use every machine, mint join tokens, remove machines and manage people. Everyone else uses only the machines an admin ticked for them in Machines, People, kept in `access.json` in the config directory (`{ "people": { "<email>": { "machines": ["<id>"] } } }`, `"*"` for every machine including later ones). Being on that list also lets a person in when `DESKPORT_ALLOWED_EMAILS` does not name them; Cloudflare Access must still let them through.
+
+- `GET /api/hosts` lists only the machines the person may use; `GET /api/me` says whether they are an admin.
+- Every route about one machine (`/api/host`, `/api/metrics`, `/api/session`, `/api/monitors`, `/api/files`, under `/` or `/h/<id>/`) and every `/ws/*` upgrade answers 403 for a machine the person was not given.
+- `POST /api/join-tokens`, `DELETE /api/hosts/:id` and `/api/admin/people` are for admins.
+- When an admin takes a machine away, that person's open screen and terminal sockets on it close with code 4003; the terminal then stops retrying. Removing a machine drops it from everyone's list.
+- The page hides People, Add machine and Remove from non-admins, and someone with no machines sees only the Machines view.
+
+`DESKPORT_INSECURE_DEV=1` (set by `npm run dev`) skips the token check and labels the session as dev. The session is an admin as `dev@localhost`; `DESKPORT_DEV_EMAIL=<email>` signs in as that address instead, so the admin lists and `access.json` apply (for testing what a non-admin sees). The server refuses to start on a non-loopback address in any mode.
 
 Responses carry `Content-Security-Policy: default-src 'self'` (plus `'unsafe-inline'` styles, which xterm.js needs), `X-Frame-Options: DENY`, `nosniff` and `no-referrer`.
 

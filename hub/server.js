@@ -16,6 +16,7 @@ import { createAgentHub } from './agents.js';
 import { createRegistry, JoinError } from './registry.js';
 import { createMachines } from './machines.js';
 import { createPrefs } from './prefs.js';
+import { createAccess } from './access.js';
 import { createReleases } from './releases.js';
 import { generateAgentKey, KINDS } from './protocol.js';
 
@@ -40,7 +41,14 @@ if (problems.length) {
 if (config.insecureDev) log('WARNING: DESKPORT_INSECURE_DEV=1, Cloudflare Access checks are OFF');
 if (!config.ui) log('DESKPORT_UI=0: serving the API and WebSockets only, no web page');
 
-const authenticate = createAuthenticator(config);
+const access = createAccess({
+  file: config.accessFile,
+  admins: config.access.adminEmails,
+  allowed: config.access.allowedEmails,
+  dev: config.insecureDev && !config.devEmail,
+  log,
+});
+const authenticate = createAuthenticator(config, access.mayEnter);
 const hosts = createHostRegistry({ config, sources: SCREEN_SOURCES, version, log });
 const agents = createAgentHub({ log, version });
 const selfId = hosts.self.id;
@@ -115,7 +123,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const api = createApi({ hosts, registry, prefs, machines });
+const api = createApi({ hosts, registry, prefs, machines, access });
 app.use((req, res, next) => { req.machine = machines.self; next(); }, api);
 app.use('/h/:hostId', (req, res, next) => {
   req.machine = machines.get(req.params.hostId);
@@ -178,10 +186,28 @@ server.on('upgrade', async (req, socket, head) => {
     log(`denied upgrade ${pathname}: ${err.message}`);
     return reject(socket, 403, 'Forbidden');
   }
+  if (!access.canUse(req.user.email, machine.id)) {
+    log(`denied upgrade ${pathname}: ${req.user.email} has not been given ${machine.id}`);
+    return reject(socket, 403, 'Forbidden');
+  }
   endpoint.handleUpgrade(req, socket, head, (ws) => {
     log(`${pathname} opened by ${req.user.email}`);
+    const open = { ws, email: req.user.email, machineId: machine.id };
+    openStreams.add(open);
+    ws.on('close', () => openStreams.delete(open));
     machine.stream(kind, ws, req);
   });
+});
+
+// A stream ends as soon as its person loses the machine on the admin page.
+const openStreams = new Set();
+access.onChange(() => {
+  for (const s of openStreams) {
+    if (access.canUse(s.email, s.machineId)) continue;
+    log(`closing a stream of ${s.email} on ${s.machineId}: access removed`);
+    s.ws.close(4003, 'access removed');
+    openStreams.delete(s);
+  }
 });
 
 // The agent shim for this machine, restarted if it exits.

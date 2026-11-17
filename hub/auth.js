@@ -11,11 +11,12 @@ function readCookie(header, name) {
 
 /**
  * Returns an async function (req) => { email } that throws when the request
- * does not carry a valid Cloudflare Access token for this application.
+ * does not carry a valid Cloudflare Access token for this application, or
+ * when mayEnter(email) (hub/access.js) refuses the identity.
  */
-export function createAuthenticator({ insecureDev, access }) {
+export function createAuthenticator({ insecureDev, devEmail, access }, mayEnter = () => true) {
   if (insecureDev) {
-    return async () => ({ email: 'dev@localhost', dev: true });
+    return async () => ({ email: devEmail || 'dev@localhost', dev: true });
   }
 
   const issuer = `https://${access.teamDomain}`;
@@ -35,8 +36,8 @@ export function createAuthenticator({ insecureDev, access }) {
     }
 
     const email = String(payload.email || '').toLowerCase();
-    if (access.allowedEmails.length && !access.allowedEmails.includes(email)) {
-      throw new AuthError(`${email || 'identity'} is not in DESKPORT_ALLOWED_EMAILS`);
+    if (!mayEnter(email)) {
+      throw new AuthError(`${email || 'identity'} is not an admin, not in DESKPORT_ALLOWED_EMAILS and not given machines on the admin page`);
     }
     return { email };
   };
