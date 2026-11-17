@@ -23,7 +23,7 @@ document.documentElement.classList.toggle('can-install', !canFullscreen && !stan
 
 const statusEl = $('status');
 const status = { screen: ['idle', 'Idle'], term: ['idle', 'Idle'], machines: ['idle', 'Idle'] };
-let view = 'screen';
+let view = 'machines';
 
 function setStatus(which, state, text) {
   status[which] = [state, text];
@@ -159,7 +159,6 @@ function showView(next) {
   $('view-term').hidden = next !== 'term';
   $('view-machines').hidden = next !== 'machines';
   setStatus(next, ...status[next]);
-  try { localStorage.setItem('deskport.view', next); } catch {}
 
   if (next === 'machines') {
     screen.releaseKeys();
@@ -184,7 +183,7 @@ for (const tab of document.querySelectorAll('button[data-view]')) {
 
 // Alt+1, Alt+2 and Alt+3 switch views without reaching the remote desktop or shell.
 window.addEventListener('keydown', (e) => {
-  const next = { 1: 'screen', 2: 'term', 3: 'machines' }[e.key];
+  const next = { 1: 'machines', 2: 'screen', 3: 'term' }[e.key];
   if (e.altKey && !e.ctrlKey && !e.metaKey && next) {
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -639,13 +638,11 @@ syncViewport();
 
 // ---------- start ----------
 
-// The last view and machine on this device. Until the list arrives, the view
-// waits, so it does not connect to the hub's own machine first.
-let initial = 'screen';
+// Every visit opens on Machines, so Screen does not connect until it is shown.
+// The machine last shown on this device stays selected for Screen and Terminal.
+const initial = 'machines';
 let savedHost = 'local';
 try {
-  const v = localStorage.getItem('deskport.view');
-  initial = v === 'term' || v === 'machines' ? v : 'screen';
   // Nothing saved (a first visit): wait for the list, since the hub's own
   // machine may not be one this person was given.
   savedHost = localStorage.getItem('deskport.host');
@@ -656,12 +653,7 @@ if (savedHost === null) {
     if (m) useMachine(m, { quiet: true });
     else showNoMachines();
   }).catch(() => {}).finally(() => { if (!noMachines) showView(initial); });
-} else if (savedHost === 'local' || initial === 'machines') {
+} else {
   showView(initial);
   if (savedHost !== 'local') hub.json('/api/hosts').then((list) => { const m = list.find((x) => x.id === savedHost && !x.local); if (m) useMachine(m, { quiet: true }); }).catch(() => {});
-} else {
-  hub.json('/api/hosts').then((list) => {
-    const m = list.find((x) => x.id === savedHost && !x.local) || list.find((x) => x.local);
-    if (m) useMachine(m, { quiet: true });
-  }).catch(() => {}).finally(() => showView(initial));
 }

@@ -20,7 +20,7 @@ browser ──https──▶ Cloudflare Access ──tunnel──▶ cloudflared
 
 | Control | What it does |
 | --- | --- |
-| Screen / Terminal (Alt+1 / Alt+2) | Switch views. Both stay connected in the background. |
+| Machines / Screen / Terminal (Alt+1 / Alt+2 / Alt+3) | Switch views. Deskport opens on Machines. Screen and Terminal stay connected in the background once shown. |
 | Show menu | Switches the Screen view between My monitor, Extra monitor and Separate desktop (see below). |
 | Clipboard button | Sends your local clipboard to the remote desktop; paste there with Ctrl+V. Copying on the remote desktop fills your local clipboard. |
 | Grid button | Presses Super (opens Activities). |

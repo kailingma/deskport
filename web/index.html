@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="/vendor/xterm.css">
   <link rel="stylesheet" href="/style.css">
 </head>
-<body data-view="screen">
+<body data-view="machines">
   <svg class="sprite" aria-hidden="true">
     <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2.5" y="3.5" width="19" height="13" rx="2"/><path d="M8 20.5h8M12 16.5v4"/></symbol>
     <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4.5 17 6-5-6-5M12.5 19h7"/></symbol>
@@ -55,14 +55,14 @@
     </div>
 
     <div class="segmented" role="tablist" aria-label="View">
-      <button class="seg" role="tab" data-view="screen" aria-selected="true" aria-controls="view-screen" title="Screen (Alt+1)">
+      <button class="seg" role="tab" data-view="machines" aria-selected="true" aria-controls="view-machines" title="Machines (Alt+1)">
+        <svg class="icon"><use href="#i-server"/></svg><span>Machines</span>
+      </button>
+      <button class="seg" role="tab" data-view="screen" aria-selected="false" aria-controls="view-screen" title="Screen (Alt+2)">
         <svg class="icon"><use href="#i-monitor"/></svg><span>Screen</span>
       </button>
-      <button class="seg" role="tab" data-view="term" aria-selected="false" aria-controls="view-term" title="Terminal (Alt+2)">
+      <button class="seg" role="tab" data-view="term" aria-selected="false" aria-controls="view-term" title="Terminal (Alt+3)">
         <svg class="icon"><use href="#i-terminal"/></svg><span>Terminal</span>
-      </button>
-      <button class="seg" role="tab" data-view="machines" aria-selected="false" aria-controls="view-machines" title="Machines (Alt+3)">
-        <svg class="icon"><use href="#i-server"/></svg><span>Machines</span>
       </button>
     </div>
 
@@ -101,7 +101,7 @@
   <button class="bar-handle" id="bar-handle" aria-label="Show toolbar" hidden><span></span></button>
 
   <main>
-    <section class="view" id="view-screen" role="tabpanel">
+    <section class="view" id="view-screen" role="tabpanel" hidden>
       <div class="display-wrap" id="display-wrap"></div>
       <div class="touch-ring" id="touch-ring" aria-hidden="true" hidden></div>
       <div class="overlay" id="screen-overlay" hidden>
@@ -128,7 +128,7 @@
       <div class="term-wrap" id="term"></div>
     </section>
 
-    <section class="view machines" id="view-machines" role="tabpanel" hidden aria-label="Machines">
+    <section class="view machines" id="view-machines" role="tabpanel" aria-label="Machines">
       <div class="machine-tools" id="machine-tools">
         <input class="input machine-search" id="machine-search" type="search" placeholder="Search" aria-label="Search machines by name, system or architecture" autocomplete="off" spellcheck="false">
         <select class="select" id="machine-sort" aria-label="Sort by"></select>
@@ -162,14 +162,14 @@
   </div>
 
   <nav class="tabbar" aria-label="View">
-    <button class="tabbar-item" data-view="screen" aria-selected="true">
+    <button class="tabbar-item" data-view="machines" aria-selected="true">
+      <span class="tab-icon"><svg class="icon"><use href="#i-server"/></svg><span class="tab-dot" data-status-for="machines"></span></span><span>Machines</span>
+    </button>
+    <button class="tabbar-item" data-view="screen" aria-selected="false">
       <span class="tab-icon"><svg class="icon"><use href="#i-monitor"/></svg><span class="tab-dot" data-status-for="screen"></span></span><span>Screen</span>
     </button>
     <button class="tabbar-item" data-view="term" aria-selected="false">
       <span class="tab-icon"><svg class="icon"><use href="#i-terminal"/></svg><span class="tab-dot" data-status-for="term"></span></span><span>Terminal</span>
-    </button>
-    <button class="tabbar-item" data-view="machines" aria-selected="false">
-      <span class="tab-icon"><svg class="icon"><use href="#i-server"/></svg><span class="tab-dot" data-status-for="machines"></span></span><span>Machines</span>
     </button>
     <button class="tabbar-item" data-action="sheet">
       <svg class="icon"><use href="#i-more"/></svg><span>More</span>

@@ -459,10 +459,18 @@ export function createMachines({ open, toast, currentId, onList }) {
       sparkline({ points, key, label, format, max, readout }));
   }
 
-  function table(head, rows, numeric = []) {
-    return el('table', { class: 'md-table' },
-      el('thead', {}, el('tr', {}, ...head.map((h, i) => el('th', { class: numeric.includes(i) ? 'num' : '' }, h)))),
-      el('tbody', {}, ...rows.map((r) => el('tr', {}, ...r.map((c, i) => el('td', { class: numeric.includes(i) ? 'num' : '' }, c))))));
+  /**
+   * A table whose column widths stay put as the values change: the widths are
+   * set on the header cells (table-layout: fixed reads them from the first row),
+   * and the first column takes the rest. Numeric columns are right-aligned.
+   * widths gives a CSS width per column, or null for the flexible one.
+   */
+  function table(head, rows, { numeric = [], widths = [], wide = false } = {}) {
+    const cls = (i) => (numeric.includes(i) ? 'num' : '');
+    return el('div', { class: 'md-scroll' },
+      el('table', { class: wide ? 'md-table md-table-wide' : 'md-table' },
+        el('thead', {}, el('tr', {}, ...head.map((h, i) => el('th', { class: cls(i), style: widths[i] ? `width:${widths[i]}` : '' }, h)))),
+        el('tbody', {}, ...rows.map((r) => el('tr', {}, ...r.map((c, i) => el('td', { class: cls(i) }, c)))))));
   }
 
   function renderDetail() {
@@ -521,20 +529,20 @@ export function createMachines({ open, toast, currentId, onList }) {
         const row = (name, p) => [name, pct(p?.some10), p?.full10 === undefined ? '' : pct(p.full10)];
         cards.push(cardBox('Pressure',
           el('p', { class: 'md-line' }, 'Share of the last 10 s that some or all tasks waited.'),
-          table(['', 'Some', 'All'], [row('Processor', pr.cpu), row('Memory', pr.memory), row('Disk', pr.io)], [1, 2])));
+          table(['', 'Some', 'All'], [row('Processor', pr.cpu), row('Memory', pr.memory), row('Disk', pr.io)], { numeric: [1, 2], widths: [null, '4.5em', '4.5em'] })));
       }
 
       const netRates = lastRates(samples, 'net', ['rxB', 'txB']);
       cards.push(cardBox('Network',
         chartRow(points, 'rx', 'Received', rate),
         chartRow(points, 'tx', 'Sent', rate),
-        (last.net || []).length > 0 && table(['Interface', 'Received', 'Sent'], (last.net || []).map((n) => [n.name, rate(netRates.get(n.name)?.rxB), rate(netRates.get(n.name)?.txB)]), [1, 2])));
+        (last.net || []).length > 0 && table(['Interface', 'Received', 'Sent'], (last.net || []).map((n) => [n.name, rate(netRates.get(n.name)?.rxB), rate(netRates.get(n.name)?.txB)]), { numeric: [1, 2], widths: [null, '7.5em', '7.5em'] })));
 
       const diskRates = lastRates(samples, 'disks', ['readB', 'writeB']);
       cards.push(cardBox('Disks',
         chartRow(points, 'read', 'Read', rate),
         chartRow(points, 'write', 'Written', rate),
-        (last.disks || []).length > 0 && table(['Disk', 'Read', 'Written'], (last.disks || []).map((d) => [d.name, rate(diskRates.get(d.name)?.readB), rate(diskRates.get(d.name)?.writeB)]), [1, 2])));
+        (last.disks || []).length > 0 && table(['Disk', 'Read', 'Written'], (last.disks || []).map((d) => [d.name, rate(diskRates.get(d.name)?.readB), rate(diskRates.get(d.name)?.writeB)]), { numeric: [1, 2], widths: [null, '7.5em', '7.5em'] })));
 
       if ((last.mounts || []).length) {
         cards.push(cardBox('Storage', ...last.mounts.map((mt) => {
@@ -546,19 +554,22 @@ export function createMachines({ open, toast, currentId, onList }) {
       }
 
       if ((last.gpus || []).length) {
-        cards.push(cardBox('Graphics', table(['Card', 'Use', 'Encoder', 'Memory', 'Temp.', 'Power'],
+        // Spans the row: six columns, and Memory reads "used of total".
+        const gpu = cardBox('Graphics', table(['Card', 'Use', 'Encoder', 'Memory', 'Temp.', 'Power'],
           last.gpus.map((g) => [g.name, pct(g.utilPct), pct(g.encoderPct), g.memTotalB ? `${bytes(g.memUsedB, 0)} of ${bytes(g.memTotalB, 0)}` : '–', Number.isFinite(g.c) ? `${g.c} °C` : '–', Number.isFinite(g.powerW) ? `${g.powerW.toFixed(0)} W` : '–']),
-          [1, 2, 3, 4, 5])));
+          { numeric: [1, 2, 3, 4, 5], widths: [null, '3.5em', '5em', '10em', '4em', '4.5em'], wide: true }));
+        gpu.classList.add('md-card-wide');
+        cards.push(gpu);
       }
 
       if ((last.temps || []).length) {
         const temps = [...last.temps].sort((a, b) => b.c - a.c);
-        cards.push(cardBox('Temperatures', table(['Sensor', '°C'], temps.map((t) => [t.sensor, t.c.toFixed(1)]), [1])));
+        cards.push(cardBox('Temperatures', table(['Sensor', '°C'], temps.map((t) => [t.sensor, t.c.toFixed(1)]), { numeric: [1], widths: [null, '4.5em'] })));
       }
 
       if ((last.top || []).length) {
         cards.push(cardBox('Busiest processes', table(['Process', 'PID', 'Processor', 'Memory'],
-          last.top.map((p) => [p.name, String(p.pid), pct(p.cpuPct), bytes(p.rssB)]), [1, 2, 3])));
+          last.top.map((p) => [p.name, String(p.pid), pct(p.cpuPct), bytes(p.rssB)]), { numeric: [1, 2, 3], widths: [null, '4em', '5.5em', '5.5em'] })));
       }
     }
 
