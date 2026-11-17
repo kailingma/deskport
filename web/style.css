@@ -266,6 +266,10 @@ body:not([data-view="term"]) .term-only { display: none; }
 .btn-secondary:hover { background: var(--surface-3); }
 @media (pointer: coarse) { .btn-primary, .btn-secondary { height: 44px; } }
 .btn-outline { border-color: var(--border); color: var(--text); }
+/* Opens a machine's Screen or Terminal: a filled, bordered button with an icon so it reads as one next to plain text. */
+.btn-open { padding: 0 12px 0 10px; border-color: var(--border); background: var(--surface-2); color: var(--text); }
+.btn-open:hover { background: var(--surface-3); }
+.btn-open .icon { color: var(--text-2); }
 
 .bar .select-bar { min-width: 0; width: auto; height: 32px; margin-right: 2px; padding-left: 10px; font-size: 13px; font-weight: 500; }
 
@@ -835,8 +839,8 @@ body[data-view="machines"] .keyrow { display: none !important; }
 .mc-figure-label { color: var(--text-2); }
 .mc-figure-value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; }
 .mc-figure .meter { grid-column: 1 / 3; }
-.mc-actions { grid-area: actions; display: flex; gap: 4px; justify-content: flex-end; }
-.machine-list[data-layout="grid"] .mc-actions { justify-content: flex-start; margin-left: -10px; }
+.mc-actions { grid-area: actions; display: flex; gap: 8px; justify-content: flex-end; }
+.machine-list[data-layout="grid"] .mc-actions { justify-content: flex-start; }
 
 .meter { height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
 .meter span { display: block; height: 100%; border-radius: 2px; background: var(--text-2); }
@@ -849,14 +853,14 @@ body[data-view="machines"] .keyrow { display: none !important; }
   .machine-list[data-layout="list"] .mc:not(:has(.mc-grip)) .mc-main { grid-column: auto; }
   .mc-figures { gap: 12px; }
   .mc-figure { flex: 1; width: auto; }
-  .mc-actions { justify-content: flex-start; margin-left: -10px; }
+  .mc-actions { justify-content: flex-start; }
 }
 
 .machine-detail { max-width: 1200px; margin: 0 auto; }
 .md-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
 .md-title { display: flex; flex-direction: column; min-width: 0; flex: 1 1 200px; }
 .md-title h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.md-actions { display: flex; gap: 4px; }
+.md-actions { display: flex; gap: 8px; }
 .md-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-items: start; }
 @media (max-width: 400px) { .md-grid { grid-template-columns: minmax(0, 1fr); } }
 .md-card { padding: 14px 16px 16px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); min-width: 0; }
