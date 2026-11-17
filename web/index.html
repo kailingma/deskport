@@ -104,6 +104,7 @@
     <section class="view" id="view-screen" role="tabpanel" hidden>
       <div class="display-wrap" id="display-wrap"></div>
       <div class="touch-ring" id="touch-ring" aria-hidden="true" hidden></div>
+      <p class="screen-notice" id="screen-notice" role="status" aria-live="polite" hidden></p>
       <div class="overlay" id="screen-overlay" hidden>
         <div class="dialog-card" role="alertdialog" aria-labelledby="screen-overlay-title" aria-describedby="screen-overlay-body">
           <h2 class="dialog-title" id="screen-overlay-title">Disconnected</h2>
@@ -115,7 +116,7 @@
       </div>
       <div class="empty-state" id="no-screen" hidden>
         <p class="empty-title" id="no-screen-title">No screen</p>
-        <p class="empty-body">This machine runs deskport-agent without a screen. Its terminal and metrics work.</p>
+        <p class="empty-body" id="no-screen-body"></p>
         <div class="empty-actions">
           <button class="btn-text" data-view="term">Terminal</button>
           <button class="btn-text" data-view="machines">Machines</button>
@@ -178,7 +179,7 @@
 
   <dialog class="sheet" id="sheet" aria-labelledby="sheet-title">
     <div class="sheet-grabber" aria-hidden="true"></div>
-    <div class="screen-only">
+    <div class="screen-only" id="sheet-sources">
       <h2 class="sheet-title" id="sheet-source-title">Show</h2>
       <div class="sheet-list" role="radiogroup" aria-labelledby="sheet-source-title" id="sheet-source">
         <button class="sheet-item" role="radio" data-source="mirror"><svg class="icon check"><use href="#i-check"/></svg>My monitor</button>
@@ -232,9 +233,9 @@
         </div>
       </section>
 
-      <section class="settings-group" aria-labelledby="sg-screen">
+      <section class="settings-group" id="screen-settings" aria-labelledby="sg-screen">
         <h3 id="sg-screen">Screen</h3>
-        <div class="field">
+        <div class="field" id="source-row">
           <label class="field-label" for="set-source">Show</label>
           <select class="select" id="set-source" data-setting="source" aria-describedby="source-help">
             <option value="mirror">My monitor</option>
@@ -314,7 +315,7 @@
         <div class="field field-stack">
           <label class="field-label" for="set-quality">Picture quality</label>
           <input type="range" id="set-quality" min="0" max="3" step="1" data-setting="quality" aria-describedby="quality-help">
-          <div class="range-labels" aria-hidden="true"><span>Low</span><span>Medium</span><span>High</span><span>Lossless</span></div>
+          <div class="range-labels" aria-hidden="true"><span>Low</span><span>Medium</span><span>High</span><span id="quality-top-label">Lossless</span></div>
         </div>
         <p class="field-help" id="quality-help"></p>
         <div class="field">

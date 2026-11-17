@@ -945,8 +945,20 @@ body:not(.is-admin) .admin-only { display: none !important; }
 }
 .empty-title { margin: 0; font-size: 16px; font-weight: 600; }
 .empty-body { margin: 0; max-width: 360px; color: var(--text-2); }
+.empty-title, .empty-body { overflow-wrap: anywhere; }
+.empty-state { overflow-y: auto; }
 .empty-actions { display: flex; gap: 8px; margin-top: 12px; }
 body.no-screen .screen-only { display: none; }
+body[data-view="screen"].screen-view-only .keyrow { display: none !important; }
+.btn-icon:disabled, .btn-text:disabled, .sheet-item:disabled { opacity: 0.5; cursor: default; }
+.screen-notice {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: min(560px, calc(100% - 24px));
+  margin: 0; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface); color: var(--text);
+  box-shadow: var(--shadow-float); font-size: 13px; overflow-wrap: anywhere;
+}
 @media (max-width: 640px) {
   .machine-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
   .machine-tools .btn-primary { margin-left: 0; }

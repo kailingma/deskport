@@ -2,7 +2,7 @@
 
 The contract between the hub and every agent. Change this page before changing either side. Nothing here may assume Linux: Windows agents follow the same protocol.
 
-Status: version 1. The local agent (a Node shim around the current host code, `shim/`) speaks it on loopback; deskport-agent (`agent/`, [agent.md](agent.md)) speaks it from other machines, with metrics and the terminal. The new screen stream arrives in roadmap phase 4; its messages are defined here so both sides are written against one page.
+Status: version 1. The local agent (a Node shim around the current host code, `shim/`) speaks it on loopback; deskport-agent (`agent/`, [agent.md](agent.md)) speaks it from other machines, with metrics, the terminal and, on supported Wayland desktops, the screen through the desktop portal. The hub machine's existing screen paths are unchanged.
 
 ## Roles
 
@@ -63,6 +63,7 @@ The agent reconnects after a drop at once, then after 1, 2, 4, 8 and 15 s (reset
 | type | Fields | When |
 | --- | --- | --- |
 | `hello` | `agent: {version, os, arch, name}`, `capabilities` (below) | First message on every control socket. |
+| `capabilities` | `capabilities` (below, the complete object, not a patch) | After `welcome`, when available features or their notes change, without reconnecting. |
 | `metrics` | `t` (Unix ms), `sample` (below) | Every `intervalMs` (from `welcome` or `metrics-rate`). |
 | `pong` | `id` | Answer to `ping`. |
 | `response` | `id`, `status`, `body` (JSON, at most 1 MB) | Answer to `request`. |
@@ -75,7 +76,16 @@ The agent reconnects after a drop at once, then after 1, 2, 4, 8 and 15 s (reset
   "terminal": true, "files": true, "metrics": true }
 ```
 
-A machine without a desktop sends `"screen": null`.
+A machine without an available screen sends `"screen": null`. Optional `notes` gives plain-text explanations keyed by feature, for example:
+
+```json
+{ "screen": null, "terminal": true, "files": false, "metrics": true,
+  "notes": { "screen": "No Wayland desktop is signed in on this machine." } }
+```
+
+The hub replaces the complete capability object on a `capabilities` message, including removing old notes. Malformed updates are ignored: capabilities and notes must be objects, screen must be null or an object with string arrays for sources and encodings, feature flags must be booleans, and notes and backend must be strings. Fields may be omitted by older agents; unknown fields are kept. `/api/host` returns that object; `/api/hosts` exposes `screen` as a boolean, `screenSources` and `screenEncodings` as arrays (empty when unavailable), `screenBackend` when supplied, and `screenNote` from `notes.screen` (null when absent). Older agents need not send `notes`, `backend` or capability updates.
+
+A portal screen advertises `"screen": {"sources": ["mirror"], "encodings": ["images", ...], "backend": "portal"}`. Only installed encoders are listed. `mirror` shares the monitor chosen in the machine's portal dialog; `virtual`, `session`, monitor switching and `match=1` are not supported by this backend. The hub never interprets `backend` as an operating system.
 
 ### Hub to agent
 
@@ -108,6 +118,10 @@ Each kind uses the messages of today's endpoint, documented in [architecture.md]
 | `video` | `/ws/video?tunnel=<uuid>` | Binary frames and JSON text, as in architecture.md, Video encodings. |
 | `term` | `/ws/term` | JSON text in both directions, binary control frames to the browser. |
 | `file` | `GET /api/files/<token>/<name>` | First a text message `{"status", "headers"}`, then the body as binary messages of at most 64 KB, then a close with 1000. The agent answers a single byte range with 206 and `Content-Range`, and `Accept-Ranges: bytes` always. |
+
+Portal `screen` streams use the same Guacamole subset as the local direct path: the tunnel id first, then `size` and `sync`, with `nop` and replies to internal `ping` while the portal waits for approval. `name` carries a plain-text session notice (waiting for approval, view only or unavailable clipboard); an empty `name` clears it when sharing starts with full control. The page shows notices as status and a toast, never as markup. A refused or ended share sends `error` and closes; it is not automatically retried. The stream socket still dials within 10 s: the approval wait happens after pairing, not before it.
+
+With `encoding=images`, the portal bridge sends JPEG `img`/`blob`/`end` instructions followed by `sync`, paced by the browser's sync acknowledgements. With video it sends the picture on the paired `video` stream, with configuration, frame acknowledgements and keyframe requests as in architecture.md. If the video encoder fails, it sends a video `error` so the page can reconnect with images. Keyboard, pointer and text clipboard use the `screen` stream. The portal's granted devices and clipboard permission determine what input it accepts. One viewer is allowed per portal agent; opening another screen ends the earlier one with an explicit error.
 
 Compression on the agent's side is negotiated per socket with permessage-deflate. An agent on another machine may offer it for `screen` and `term`, never for `video`; an agent on the hub's own machine (loopback) offers none. The hub accepts it when offered. The hub compresses for the browser independently, as today.
 
@@ -146,3 +160,4 @@ What a Windows agent sends: `cpu.total` and `cpu.cores` as user, 0, system (kern
 | 1 | 2026-11-12 | First version. |
 | 1 | 2026-11-13 | Added within version 1 (unknown fields and types are ignored): `releaseKey` in the join answer, the `update` message, signed GETs of `/agent/v1/download/`. |
 | 1 | 2026-11-16 | Added within version 1: `os: "windows"`, the platform `windows-x86_64`, `memory.commitB` and `memory.commitLimitB`. |
+| 1 | 2026-11-16 | Added within version 1: complete `capabilities` updates, optional capability `notes` and `screen.backend`, and portal screen session notices through Guacamole `name`. |

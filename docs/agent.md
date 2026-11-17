@@ -2,7 +2,7 @@
 
 One per machine. It dials out to the hub, so a machine needs no tunnel, Access application or open port of its own. It speaks [protocol.md](protocol.md). Source: `agent/` (Rust).
 
-What it does today: the control socket, metrics, and the terminal (tmux on Linux, a shell in a pseudo console on Windows). It has no screen yet (roadmap phase 4); this desktop's screen still comes from the agent shim (`shim/`), which the hub starts itself.
+What it does today: the control socket, metrics, the terminal (tmux on Linux, a shell in a pseudo console on Windows) and, on Linux Wayland desktops, the screen through the desktop portal (below). The hub machine's own screen still comes from the agent shim (`shim/`, guacd, RDP and Mutter), which the hub starts itself; nothing about it changed.
 
 This page describes Linux. The Windows build (install with PowerShell, a scheduled task at logon, ConPTY terminal, Windows metrics) is in [windows.md](windows.md); it has not run on Windows yet.
 
@@ -11,14 +11,14 @@ This page describes Linux. The Windows build (install with PowerShell, a schedul
 On the hub: build the agent (`npm run build:agent`, needs Rust) and mint a join token (see [setup.md](setup.md), step 9). On the machine:
 
 ```bash
-curl -fsSL https://<hub>/agent/v1/install.sh | sh -s -- <join token> [--name "<name>"] [--rejoin] [--no-tmux]
+curl -fsSL https://<hub>/agent/v1/install.sh | sh -s -- <join token> [--name "<name>"] [--rejoin] [--no-tmux] [--no-screen]
 ```
 
 The hub writes its own address into the script it serves (from the request's `Host`; `hubOrigin()` in `hub/hosts.js`). `scripts/install-agent.sh <hub url> <join token>` does the same from a checkout, with `--binary <path>` to skip the download. Without a token it asks on the terminal, or takes `DESKPORT_JOIN_TOKEN`. It:
 
 1. downloads the build for this machine (`/agent/v1/download/linux-x86_64` or `linux-aarch64`, which needs the join token in an `Authorization: Bearer` header) into `~/.local/bin/deskport-agent`; on a machine that has `agent.json` and `agent.key` already, it keeps the binary (the agent updates itself) and skips joining unless `--rejoin`,
 2. runs `deskport-agent join`, which makes the machine's Ed25519 key and registers its public key with the hub,
-3. offers to install tmux with apt, dnf, yum, pacman, zypper or apk (with sudo after asking; as root without asking),
+3. offers to install tmux with apt, dnf, yum, pacman, zypper or apk (with sudo after asking; as root without asking), and, where a Wayland session is installed (`/usr/share/wayland-sessions`) and GStreamer is incomplete, the screen's packages (python3-gi, GStreamer base, good, bad and ugly plugins, the PipeWire plugin) with apt, dnf, pacman or zypper the same way; `--no-screen` skips that offer,
 4. writes and starts the systemd user unit `deskport-agent.service`, and prints the `loginctl enable-linger` command if the agent would stop at logout. Without a systemd user session (a container, a minimal server) it writes `~/.local/bin/deskport-agent-loop`, which restarts the agent like the unit would and stops on exit status 3, starts it in the background with its log in the settings directory, and adds a crontab `@reboot` entry for it.
 
 ## Uninstall
@@ -49,6 +49,20 @@ curl -fsSL https://<hub>/agent/v1/uninstall.sh | sh
 | `DESKPORT_TMUX_SESSION` | tmux session the terminal attaches to (default `web`). |
 | `DESKPORT_TERM_CWD` | Directory new sessions start in (default home). |
 | `DESKPORT_TERM_WINDOW` | Flow control window in characters (default 131072). |
+| `~/.config/deskport-agent/portal-screen.py` | The screen helper, written from the binary when it differs. |
+| `~/.config/deskport-agent/screen-restore-token` | The portal's restore token (mode 600). Delete it to be asked again at the machine. |
+
+## Screen
+
+On a Wayland desktop with an xdg-desktop-portal RemoteDesktop backend (KDE Plasma with xdg-desktop-portal-kde, GNOME with xdg-desktop-portal-gnome, others), the agent shares the screen through the portal. `scripts/portal-screen.py`, carried in the binary, does the portal calls, PipeWire capture, encoding (JPEG for Images, x264enc or openh264enc with h264parse for H.264, av1enc with av1parse for AV1), input and clipboard with the system's python3 and GStreamer; `agent/src/screen/bridge.rs` turns that into the Guacamole subset the page already speaks (protocol.md, Streams).
+
+- **Asking.** The first connection makes the portal ask at the machine which monitor to share and whether to allow control. The page shows "Waiting for someone at <machine> to allow screen sharing." meanwhile (up to 3 minutes). The answer is kept as a restore token, so later connections start without asking until it is revoked or the file is deleted.
+- **Permissions.** Keyboard, pointer and clipboard are used only as far as the portal granted them, in the helper, the bridge and the page. A share without control is view only; a share whose clipboard was not explicitly allowed says "Clipboard unavailable". The page disables the matching buttons.
+- **Video.** Images always work; H.264 and AV1 are offered only when the encoder and its parser are installed. If the encoder fails, the bridge reports it on the video stream and the page reconnects with images until the picture settings change.
+- **One viewer.** Opening the screen in another window ends the earlier one with a message.
+- **What is missing.** The agent checks at start, then every 30 s while the screen is unavailable and every 5 minutes otherwise. The hub shows the reason and the install command on the machine's no-screen page.
+
+Only My monitor is offered; extra monitors, separate desktops and Match this device stay with the hub machine.
 
 ## Terminal
 

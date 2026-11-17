@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node hub/server.js",
     "dev": "DESKPORT_INSECURE_DEV=1 node --watch hub/server.js",
-    "check": "for f in hub/*.js shim/*.js src/*.js web/*.js web/js/*.js bench/*.mjs bench/lib/*.mjs; do node --check \"$f\" || exit 1; done && sh -n bin/xdg-open && sh -n scripts/install-agent.sh && sh -n scripts/uninstall-agent.sh && python3 -m py_compile scripts/session-scale.py scripts/session-systemd-proxy.py scripts/monitor-config.py scripts/video-encoder.py",
+    "check": "for f in hub/*.js shim/*.js src/*.js web/*.js web/js/*.js bench/*.mjs bench/lib/*.mjs; do node --check \"$f\" || exit 1; done && sh -n bin/xdg-open && sh -n scripts/install-agent.sh && sh -n scripts/uninstall-agent.sh && python3 -m py_compile scripts/session-scale.py scripts/session-systemd-proxy.py scripts/monitor-config.py scripts/video-encoder.py scripts/portal-screen.py",
     "test": "node --test 'test/*.test.js'",
     "bench": "node bench/run.mjs",
     "build:agent": "cd agent && CC_x86_64_unknown_linux_musl=gcc cargo build --release -j 4 --target x86_64-unknown-linux-musl",

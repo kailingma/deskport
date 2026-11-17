@@ -51,17 +51,30 @@ export function createApi({ hosts, registry, prefs, machines, access }) {
     return [{ id: self.id, name: self.name, local: true }, ...registry.list().map((m) => ({ id: m.id, name: m.name, local: false, os: m.os }))];
   }
 
+  function screenFields(caps, encodings = []) {
+    const screen = caps?.screen;
+    return {
+      screenSources: Array.isArray(screen?.sources) ? screen.sources : [],
+      screenEncodings: screen ? (Array.isArray(screen.encodings) ? screen.encodings : encodings) : [],
+      ...(typeof screen?.backend === 'string' ? { screenBackend: screen.backend } : {}),
+      screenNote: typeof caps?.notes?.screen === 'string' ? caps.notes.screen : null,
+    };
+  }
+
   api.get('/api/hosts', (req, res) => {
     const email = req.user.email;
     const self = machines.self.describe();
     const list = access.canUse(email, self.id) ? [{
       id: self.id, name: self.name, local: true, status: 'online', os: 'linux',
-      screen: true, terminal: true, ...registry.summary(self.id),
+      screen: true, terminal: true, ...screenFields(self.capabilities, ['images', 'av1', 'h264']), ...registry.summary(self.id),
     }] : [];
     for (const m of registry.list()) {
       if (!access.canUse(email, m.id)) continue;
       const caps = machines.get(m.id).describe().capabilities;
-      list.push({ ...m, local: false, screen: Boolean(caps?.screen), terminal: caps ? Boolean(caps.terminal) : true, ...registry.summary(m.id) });
+      list.push({
+        ...m, local: false, screen: Boolean(caps?.screen), terminal: caps ? Boolean(caps.terminal) : true,
+        ...screenFields(caps), ...registry.summary(m.id),
+      });
     }
     noStore(res).json(list);
   });

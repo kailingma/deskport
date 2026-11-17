@@ -1,6 +1,7 @@
 //! deskport-agent: one per machine. Dials out to a deskport hub, keeps a
-//! control socket open, sends metrics, and serves the terminal on the
-//! streams the hub asks for (docs/protocol.md).
+//! control socket open, sends metrics, and serves the terminal and, where
+//! the desktop has a remote desktop portal, the screen on the streams the
+//! hub asks for (docs/protocol.md).
 //!
 //!   deskport-agent join <hub url> <join token> [--name <name>]
 //!   deskport-agent run
@@ -12,6 +13,7 @@ mod config;
 mod metrics;
 mod protocol;
 mod runner;
+mod screen;
 mod sys;
 mod terminal;
 mod update;
@@ -68,7 +70,7 @@ fn join(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+pub(crate) type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 async fn dial(cfg: &config::Config, seed: &[u8; 32], path: &str) -> Result<Ws, String> {
     let mut req = protocol::ws_url(&cfg.hub, path).into_client_request().map_err(|e| e.to_string())?;
@@ -91,12 +93,19 @@ enum Ended {
 }
 
 /// One control socket, from hello until it closes.
-async fn control(cfg: &config::Config, seed: &[u8; 32], connected: &mut Option<Instant>) -> Result<Ended, String> {
+/// How often the screen is checked again: sooner while it is not available
+/// (nobody signed in yet, packages being installed).
+const SCREEN_RECHECK: Duration = Duration::from_secs(30);
+const SCREEN_RECHECK_OK: Duration = Duration::from_secs(300);
+
+async fn control(cfg: &config::Config, seed: &[u8; 32], connected: &mut Option<Instant>, caps_rx: &mut tokio::sync::watch::Receiver<u64>) -> Result<Ended, String> {
     let ws = dial(cfg, seed, &format!("{PREFIX}control")).await?;
     *connected = Some(Instant::now());
     let (mut tx, mut rx) = ws.split();
     let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let caps = json!({ "screen": null, "terminal": terminal::available(), "files": false, "metrics": true });
+    let has_terminal = terminal::available();
+    let caps = screen::capabilities(has_terminal);
+    caps_rx.mark_unchanged();
     let hello = json!({ "type": "hello", "agent": { "version": VERSION, "os": os_name(), "arch": std::env::consts::ARCH, "name": cfg.name }, "capabilities": caps });
     tx.send(Message::text(hello.to_string())).await.map_err(|e| e.to_string())?;
 
@@ -156,7 +165,7 @@ async fn control(cfg: &config::Config, seed: &[u8; 32], connected: &mut Option<I
                         let stream = v["stream"].as_str().unwrap_or("").to_string();
                         let kind = v["kind"].as_str().unwrap_or("").to_string();
                         if !valid_stream_id(&stream) { continue; }
-                        if kind != "term" {
+                        if !matches!(kind.as_str(), "term" | "screen" | "video") {
                             let _ = out_tx.send(json!({ "type": "stream-failed", "stream": stream, "message": format!("this machine has no {kind}") }).to_string());
                             continue;
                         }
@@ -164,7 +173,11 @@ async fn control(cfg: &config::Config, seed: &[u8; 32], connected: &mut Option<I
                         let (cfg, seed, out_tx) = (cfg.clone(), *seed, out_tx.clone());
                         tokio::spawn(async move {
                             match dial(&cfg, &seed, &format!("{PREFIX}stream/{stream}")).await {
-                                Ok(ws) => terminal::serve(ws, &query).await,
+                                Ok(ws) => match kind.as_str() {
+                                    "screen" => screen::serve_screen(ws, &query).await,
+                                    "video" => screen::serve_video(ws, &query).await,
+                                    _ => terminal::serve(ws, &query).await,
+                                },
                                 Err(e) => {
                                     eprintln!("stream {kind}: {e}");
                                     let _ = out_tx.send(json!({ "type": "stream-failed", "stream": stream, "message": e }).to_string());
@@ -174,6 +187,10 @@ async fn control(cfg: &config::Config, seed: &[u8; 32], connected: &mut Option<I
                     }
                     _ => {}
                 }
+            }
+            Ok(()) = caps_rx.changed(), if welcomed => {
+                let caps = screen::capabilities(has_terminal);
+                tx.send(Message::text(json!({ "type": "capabilities", "capabilities": caps }).to_string())).await.map_err(|e| e.to_string())?;
             }
             Some(out) = out_rx.recv() => { tx.send(Message::text(out)).await.map_err(|e| e.to_string())?; }
             _ = tick.tick(), if welcomed => {
@@ -189,10 +206,21 @@ async fn control(cfg: &config::Config, seed: &[u8; 32], connected: &mut Option<I
 
 async fn run() -> Result<(), String> {
     let (cfg, seed) = config::load()?;
+    let _ = tokio::task::spawn_blocking(screen::probe).await;
+    let (caps_tx, mut caps_rx) = tokio::sync::watch::channel(0u64);
+    tokio::spawn(async move {
+        loop {
+            let wait = if screen::current().0.is_null() { SCREEN_RECHECK } else { SCREEN_RECHECK_OK };
+            tokio::time::sleep(wait).await;
+            if tokio::task::spawn_blocking(screen::probe).await.unwrap_or(false) {
+                caps_tx.send_modify(|n| *n += 1);
+            }
+        }
+    });
     let mut attempt = 0usize;
     loop {
         let mut connected = None;
-        let r = control(&cfg, &seed, &mut connected).await;
+        let r = control(&cfg, &seed, &mut connected, &mut caps_rx).await;
         match r {
             Ok(Ended::Removed) => return Err(format!("{REMOVED}; join it again to reconnect")),
             Ok(Ended::Dropped) => eprintln!("control socket closed"),

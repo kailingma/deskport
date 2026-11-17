@@ -18,6 +18,24 @@ const STREAM_ID = /^[A-Za-z0-9_-]{22}$/;
 export class AgentUnavailable extends Error {}
 
 const sendable = (ws) => ws.readyState === ws.OPEN;
+const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** Known capability fields are typed; unknown fields stay available to newer agents. */
+function validCapabilities(caps) {
+  if (!object(caps)) return false;
+  for (const key of ['terminal', 'files', 'metrics']) {
+    if (key in caps && typeof caps[key] !== 'boolean') return false;
+  }
+  if (caps.screen !== undefined && caps.screen !== null) {
+    if (!object(caps.screen)) return false;
+    for (const key of ['sources', 'encodings']) {
+      if (key in caps.screen && (!Array.isArray(caps.screen[key]) || caps.screen[key].some((v) => typeof v !== 'string'))) return false;
+    }
+    if ('backend' in caps.screen && typeof caps.screen.backend !== 'string') return false;
+  }
+  if ('notes' in caps && (!object(caps.notes) || Object.values(caps.notes).some((v) => typeof v !== 'string'))) return false;
+  return true;
+}
 
 /** Closes ws with the code and reason the other side closed with. */
 function closeLike(ws, code, reason) {
@@ -89,8 +107,9 @@ export function createAgentHub({ log, version }) {
       if (isBinary) return;
       let msg;
       try { msg = JSON.parse(raw.toString()); } catch { return; }
+      if (!object(msg)) return;
       if (msg.type === 'hello' && !entry.welcomed) {
-        entry.hello = { agent: msg.agent || {}, capabilities: msg.capabilities || {} };
+        entry.hello = { agent: object(msg.agent) ? msg.agent : {}, capabilities: validCapabilities(msg.capabilities) ? msg.capabilities : {} };
         entry.welcomed = true;
         ws.send(JSON.stringify({ type: 'welcome', protocol: PROTOCOL, hub: { version }, id, metrics: { intervalMs: rates.get(id) ?? 15000 } }));
         log(`agent ${id} connected (${entry.hello.agent.version || '?'}, ${entry.hello.agent.os || '?'})`);
@@ -109,6 +128,9 @@ export function createAgentHub({ log, version }) {
         pendingRequests.delete(msg.id);
         clearTimeout(p.timer);
         p.resolve({ status: Number.isInteger(msg.status) ? msg.status : 502, body: msg.body ?? null });
+      } else if (msg.type === 'capabilities' && validCapabilities(msg.capabilities)) {
+        entry.hello.capabilities = msg.capabilities;
+        log(`agent ${id}: capabilities changed (screen ${msg.capabilities.screen ? 'available' : 'not available'})`);
       } else if (msg.type === 'metrics' && msg.sample && typeof msg.sample === 'object') {
         hub.onMetrics?.(id, Number(msg.t), msg.sample);
       } else if (msg.type === 'stream-failed') {

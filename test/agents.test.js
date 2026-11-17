@@ -72,11 +72,11 @@ async function startHub({ wait = false } = {}) {
 }
 
 /** A minimal agent: connects, says hello, and hands each open to onOpen(msg, dialStream). */
-async function startAgent(hub, key, { onOpen, onRequest } = {}) {
+async function startAgent(hub, key, { onOpen, onRequest = async () => ({ status: 200, body: null }), capabilities = { terminal: true } } = {}) {
   const dial = (p) => new WebSocket(`${hub.base}${p}`, SUBPROTOCOL, { headers: signUpgrade({ id: 'pc', privateKeyPem: key.privateKeyPem, pathAndQuery: p }) });
   const control = dial('/agent/v1/control');
   await once(control, 'open');
-  control.send(JSON.stringify({ type: 'hello', agent: { version: '1', os: 'linux' }, capabilities: { terminal: true } }));
+  control.send(JSON.stringify({ type: 'hello', agent: { version: '1', os: 'linux' }, capabilities }));
   const welcome = JSON.parse((await once(control, 'message'))[0]);
   control.on('message', async (raw) => {
     const msg = JSON.parse(raw);
@@ -85,6 +85,43 @@ async function startAgent(hub, key, { onOpen, onRequest } = {}) {
   });
   return { control, welcome, dial };
 }
+
+test('capabilities: complete replacement removes notes without reconnecting', async (t) => {
+  const hub = await startHub();
+  t.after(() => hub.close());
+  const key = generateAgentKey();
+  hub.agents.register('pc', key.publicKey);
+  const initial = { screen: null, terminal: true, files: false, metrics: true, notes: { screen: 'Install the screen packages.' } };
+  const agent = await startAgent(hub, key, { capabilities: initial });
+  const replace = async (capabilities) => {
+    agent.control.send(JSON.stringify({ type: 'capabilities', capabilities }));
+    await hub.agents.request('pc', { method: 'GET', path: '/test/fence' });
+  };
+  assert.deepEqual(hub.agents.hello('pc').capabilities, initial);
+  const ready = { screen: { sources: ['mirror'], encodings: ['images', 'h264'], backend: 'portal' }, terminal: true, files: false, metrics: true, future: { enabled: true } };
+  await replace(ready);
+  assert.deepEqual(hub.agents.hello('pc').capabilities, ready);
+  assert.equal(hub.agents.hello('pc').agent.version, '1');
+  assert.equal(hub.agents.connected('pc'), true);
+  await replace({ screen: null, terminal: false });
+  assert.deepEqual(hub.agents.hello('pc').capabilities, { screen: null, terminal: false });
+});
+
+test('capabilities: malformed updates and non-object control messages are ignored', async (t) => {
+  const hub = await startHub();
+  t.after(() => hub.close());
+  const key = generateAgentKey();
+  hub.agents.register('pc', key.publicKey);
+  const capabilities = { screen: { sources: ['mirror'], encodings: ['images'], backend: 'portal' }, terminal: true };
+  const agent = await startAgent(hub, key, { capabilities });
+  for (const bad of [undefined, null, [], 'screen', { screen: true }, { screen: [] }, { screen: { sources: 'mirror' } }, { screen: { encodings: [null] } }, { screen: { backend: {} } }, { terminal: 'yes' }, { notes: [] }, { notes: { screen: {} } }]) {
+    agent.control.send(JSON.stringify({ type: 'capabilities', capabilities: bad }));
+  }
+  for (const raw of ['null', '[]', '"hello"', '{']) agent.control.send(raw);
+  await hub.agents.request('pc', { method: 'GET', path: '/test/fence' });
+  assert.deepEqual(hub.agents.hello('pc').capabilities, capabilities);
+  assert.equal(hub.agents.connected('pc'), true);
+});
 
 test('relay: held input, both message types, close codes and reasons', async () => {
   const hub = await startHub();

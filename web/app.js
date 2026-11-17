@@ -7,6 +7,7 @@ import { localHost, hub } from './js/host.js';
 import { createMachines } from './js/machines.js';
 import { createPeople } from './js/people.js';
 import { ask } from './js/dialog.js';
+import { pictureOptions, screenChoices, SCREEN_SOURCES, SCREEN_ENCODINGS } from './js/screen-options.js';
 
 const $ = (id) => document.getElementById(id);
 // The machine the Screen and Terminal views show; the Machines view switches it.
@@ -62,14 +63,17 @@ function toast(text, { action, ms } = {}) {
 }
 
 let me = null;
-// The machine being shown: { id, name, local, screen, terminal }, the hub's own until the list says otherwise.
+// The machine being shown, including its screen capabilities and availability note.
 let machine = { id: 'local', name: '', local: true, screen: true, terminal: true };
+let screenPermissions = { control: true, clipboard: true };
 
 function showMachineName() {
   const name = machine.local ? me?.host ?? '' : machine.name;
   $('host').textContent = machine.local && me?.dev ? `${name} (dev)` : name;
   if (name) document.title = `${name} · deskport`;
   $('no-screen-title').textContent = `${machine.name || 'This machine'} has no screen`;
+  $('no-screen-body').textContent = machine.screenNote || 'Screen sharing is not available on this machine. You can still use its other features.';
+  $('no-screen').querySelector('[data-view="term"]').hidden = !machine.terminal;
 }
 
 hub.json('/api/me').then((data) => {
@@ -78,35 +82,62 @@ hub.json('/api/me').then((data) => {
   showMachineName();
 }).catch(() => {});
 
-const screen = createScreen({ host, setStatus, toast });
+const screen = createScreen({
+  host, setStatus, toast, machine: () => machine,
+  onPermissions(permissions) { screenPermissions = permissions; syncInputControls(); },
+});
 const term = createTerminal({ host, setStatus, toast });
 
 /** Points Screen and Terminal at another machine, reconnecting what was connected. */
 function useMachine(m, { quiet = false } = {}) {
   noMachines = false;
   const same = m.id === machine.id || (m.local && machine.local);
-  machine = { id: m.local ? 'local' : m.id, name: m.name, local: Boolean(m.local), screen: Boolean(m.screen), terminal: m.terminal !== false };
+  const next = {
+    id: m.local ? 'local' : m.id, name: m.name, local: Boolean(m.local), screen: Boolean(m.screen), terminal: m.terminal !== false,
+    screenSources: m.screenSources ?? [], screenEncodings: m.screenEncodings ?? [],
+    screenBackend: m.screenBackend, screenNote: m.screenNote ?? null,
+  };
+  if (same && JSON.stringify(next) === JSON.stringify(machine)) return;
+  const previous = machine;
+  const before = JSON.stringify(pictureOptions(machine, settings.get));
+  machine = next;
   try { localStorage.setItem('deskport.host', machine.local ? 'local' : machine.id); } catch {}
   showMachineName();
   document.body.classList.toggle('no-screen', !machine.screen);
   $('no-screen').hidden = machine.screen;
-  if (same) return;
-  host.use(machine.id);
-  settings.useHost(m.id, machine.local);
-  syncSource();
-  if (machine.screen) {
-    if (view === 'screen') screen.reconnect();
-    else screen.markStale();
-  } else {
-    screen.stop();
+  if (!same) {
+    host.use(machine.id);
+    settings.useHost(m.id, machine.local);
   }
-  term.switchHost();
-  if (!quiet) toast(`Showing ${m.name}`);
+  syncSource();
+  syncInputControls();
+  const changed = !same || machine.screen !== previous.screen || machine.screenBackend !== previous.screenBackend
+    || before !== JSON.stringify(pictureOptions(machine, settings.get));
+  if (!machine.screen) screen.stop();
+  else if (changed) {
+    if (view === 'screen') screen.reconnect();
+    // A different machine: drop the old connection so its late video,
+    // clipboard or connect callbacks cannot reach the new one.
+    else if (!same) screen.close();
+    else screen.markStale();
+  }
+  if (!machine.terminal) {
+    term.stop();
+    if (view === 'term') showView('machines');
+  } else if (!same) term.switchHost();
+  else if (!previous.terminal && view === 'term') term.ensureConnected();
+  if (settingsDialog.open) {
+    syncSettingsForm();
+    if (changed) screenAtOpen = screenSettings();
+    if (!same) { refreshSession(); refreshMonitors(); }
+  }
+  if (!quiet && !same) toast(`Showing ${m.name}`);
 }
 
 const machines = createMachines({
   toast,
   currentId: () => machine.id,
+  watchSelected: () => !machine.local,
   open(m, which) {
     useMachine(m);
     showView(which === 'screen' && !m.screen ? 'term' : which);
@@ -125,7 +156,7 @@ const machines = createMachines({
       else showNoMachines();
     } else if (!err) {
       const cur = list.find((m) => (machine.local ? m.local : m.id === machine.id));
-      if (cur && (cur.name !== machine.name || cur.screen !== machine.screen)) useMachine(cur, { quiet: true });
+      if (cur) useMachine(cur, { quiet: true });
     }
   },
 });
@@ -150,6 +181,10 @@ function showView(next) {
     toast('No machines have been given to you yet');
     next = 'machines';
   }
+  if (next === 'term' && !machine.terminal) {
+    toast('This machine has no terminal');
+    next = 'machines';
+  }
   view = next;
   document.body.dataset.view = next;
   for (const tab of document.querySelectorAll('button[data-view]')) {
@@ -159,6 +194,7 @@ function showView(next) {
   $('view-term').hidden = next !== 'term';
   $('view-machines').hidden = next !== 'machines';
   setStatus(next, ...status[next]);
+  syncInputControls();
 
   if (next === 'machines') {
     screen.releaseKeys();
@@ -251,6 +287,12 @@ const QUALITY_HELP = {
   high: 'Sharp. Areas that are changing look soft for a moment.',
   lossless: 'Exact pixels. Uses about a third more data than High.',
 };
+const PORTAL_QUALITY_HELP = {
+  low: 'JPEG at 40% quality. Small text can be hard to read. Uses the least data.',
+  medium: 'JPEG at 65% quality. Text is clearer, at more data.',
+  high: 'JPEG at 85% quality. Sharper text, at more data.',
+  lossless: 'JPEG at 95% quality. The sharpest images here, but not exact pixels.',
+};
 const PRIORITY_HELP = {
   speed: 'Sends every frame as soon as it is ready.',
   data: 'Sends at most 10 frames a second.',
@@ -276,6 +318,7 @@ const SPEED_HELP = {
   av1: ['About 13 ms to encode a frame.', 'About 15 ms to encode a frame, searching longer for a smaller encoding.', 'About 19 ms to encode a frame, the encoder\'s most thorough setting here.'],
   h264: ['About 2 ms to encode a frame.', 'About 3 ms to encode a frame, searching longer for a smaller encoding.', 'About 5 ms to encode a frame, the encoder\'s most thorough setting here.'],
 };
+const PORTAL_SPEED_HELP = ['Encodes quickly, at more data.', 'Spends longer encoding to use less data.', 'Spends the most time encoding to use the least data.'];
 const SCREEN_SETTINGS = ['source', 'resolution', 'quality', 'priority', 'matchMonitor', 'monitor', 'encoding', 'encSpeed', 'bitrate', 'direct'];
 let decodes = null;
 screen.videoSupport().then((s) => {
@@ -320,6 +363,13 @@ fillSelect('set-term-theme', TERMINAL_THEMES);
 fillSelect('set-term-font', TERMINAL_FONTS);
 
 function syncSettingsForm() {
+  const { sources, encodings } = screenChoices(machine);
+  const options = pictureOptions(machine, settings.get);
+  const portal = machine.screenBackend === 'portal';
+  $('screen-settings').hidden = !machine.screen;
+  fillScreenSelect('set-source', sources, SCREEN_SOURCES);
+  fillScreenSelect('set-encoding', encodings, SCREEN_ENCODINGS);
+  $('source-row').hidden = sources.length < 2;
   for (const group of settingsDialog.querySelectorAll('[role="radiogroup"][data-setting]')) {
     const value = settings.get(group.dataset.setting);
     for (const b of group.querySelectorAll('[role="radio"]')) {
@@ -328,11 +378,13 @@ function syncSettingsForm() {
       b.tabIndex = on ? 0 : -1;
     }
   }
-  const source = settings.get('source');
+  const source = options.source;
   $('set-source').value = source;
-  $('source-help').textContent = SOURCE_HELP[source];
-  const matched = source === 'mirror' && settings.get('matchMonitor');
-  $('monitor-rows').hidden = source !== 'mirror';
+  $('source-help').textContent = portal
+    ? 'The monitor chosen in this machine\'s sharing dialog. Its resolution is not changed. Someone there must allow the first connection.'
+    : SOURCE_HELP[source];
+  const matched = options.matchMonitor;
+  $('monitor-rows').hidden = !machine.local || source !== 'mirror';
   $('set-match').checked = settings.get('matchMonitor');
   $('match-help').textContent = settings.get('matchMonitor')
     ? 'While you are connected, the monitor switches to the resolution closest to this device. It switches back a few seconds after you disconnect.'
@@ -344,37 +396,43 @@ function syncSettingsForm() {
   $('resolution-help').textContent = source !== 'mirror' || matched
     ? 'Always matches this window.'
     : size ? `Receiving ${size[0]} × ${size[1]} pixels.` : '';
-  const encoding = settings.get('encoding');
+  const encoding = options.encoding;
   const isVideo = encoding !== 'images';
   $('set-encoding').value = encoding;
   const name = encoding === 'av1' ? 'AV1' : 'H.264';
-  $('encoding-help').textContent = ENCODING_HELP[encoding]
+  const encodingHelp = !portal ? ENCODING_HELP[encoding] : encoding === 'images'
+    ? 'Full frames are sent as JPEG pictures. Works in every browser.'
+    : 'A video stream, encoded on this machine\'s processor. The pointer is part of the picture.';
+  $('encoding-help').textContent = encodingHelp
     + (!isVideo || !decodes ? '' : decodes[encoding] ? ` This browser can decode ${name}.` : ` This browser cannot decode ${name}, so images are sent instead.`);
   $('video-rows').hidden = !isVideo;
   if (isVideo) {
     $('set-enc-speed').value = String(settings.get('encSpeed'));
-    $('enc-speed-help').textContent = SPEED_HELP[encoding][settings.get('encSpeed')];
+    $('enc-speed-help').textContent = (portal ? PORTAL_SPEED_HELP : SPEED_HELP[encoding])[settings.get('encSpeed')];
     $('set-bitrate').value = settings.get('bitrate');
     $('bitrate-help').textContent = bitrateHelp(settings.get('bitrate'), settings.get('priority'));
     $('video-stats').textContent = videoStatsLine();
     $('video-stats').hidden = !$('video-stats').textContent;
-    $('direct-rows').hidden = source !== 'session';
+    $('direct-rows').hidden = !machine.local || source !== 'session';
     $('set-direct').checked = settings.get('direct');
     $('direct-help').textContent = settings.get('direct')
       ? 'Keys and the pointer go straight to the separate desktop, and its picture is recorded without Remote Desktop. It starts in about half a second. Not yet: the clipboard, and the pointer is part of the video, so it moves with the picture.'
       : 'Off: the separate desktop is reached through Remote Desktop, like your monitor.';
   }
   $('set-quality').value = String(QUALITY.indexOf(settings.get('quality')));
-  $('quality-help').textContent = (isVideo ? VIDEO_QUALITY_HELP : QUALITY_HELP)[settings.get('quality')];
+  $('quality-top-label').textContent = portal ? 'Highest' : 'Lossless';
+  $('quality-help').textContent = (isVideo ? VIDEO_QUALITY_HELP : portal ? PORTAL_QUALITY_HELP : QUALITY_HELP)[settings.get('quality')];
   const [fps, adapt] = VIDEO_PRIORITY_HELP[settings.get('priority')];
-  $('priority-help').textContent = !isVideo ? PRIORITY_HELP[settings.get('priority')]
+  $('priority-help').textContent = !isVideo ? portal ? `Up to ${settings.get('priority') === 'data' ? 10 : 30} frames a second. Frames wait for this browser to acknowledge the picture.` : PRIORITY_HELP[settings.get('priority')]
     : settings.get('bitrate') === 'auto' ? `${fps} ${adapt}` : fps;
   $('set-term-theme').value = settings.get('termTheme');
   $('set-term-font').value = settings.get('termFont');
   $('set-term-size').value = String(settings.get('termFontSize'));
   $('term-size-value').textContent = `${settings.get('termFontSize')}px`;
   $('set-blink').checked = settings.get('cursorBlink');
-  $('kb-help').textContent = KB_HELP[settings.get('kbResize')];
+  $('kb-help').textContent = portal && settings.get('kbResize') === 'resize'
+    ? 'The picture shrinks to fit above the keyboard. This machine\'s monitor is not resized.'
+    : KB_HELP[settings.get('kbResize')];
   $('settings-who').textContent = me ? `Signed in as ${me.email} on ${me.host}` : '';
 }
 
@@ -422,10 +480,10 @@ settingsDialog.addEventListener('input', async (e) => {
   syncSettingsForm();
   if (t.id === 'set-source') refreshSession();
 });
-const screenSettings = () => SCREEN_SETTINGS.map((k) => settings.get(k)).join('|');
+const screenSettings = () => JSON.stringify({ ...Object.fromEntries(SCREEN_SETTINGS.map((k) => [k, settings.get(k)])), ...pictureOptions(machine, settings.get) });
 
 settingsDialog.addEventListener('close', () => {
-  if (screenSettings() === screenAtOpen) return;
+  if (!machine.screen || screenSettings() === screenAtOpen) return;
   if (view === 'screen') {
     screen.reconnect();
     toast('Reconnecting with the new picture settings');
@@ -449,8 +507,12 @@ function syncMonitorPick() {
   $('monitor-help').textContent = 'GNOME desktop sharing shows one monitor at a time. The one chosen is made the primary monitor while you are connected.';
 }
 async function refreshMonitors() {
+  if (!machine.local) { monitorList = []; syncMonitorPick(); return; }
+  const id = host.id;
   try {
-    monitorList = await host.json('/api/monitors');
+    const list = await host.json('/api/monitors');
+    if (host.id !== id) return;
+    monitorList = list;
   } catch {
     monitorList = [];
   }
@@ -477,8 +539,11 @@ function openSettings() {
 
 async function refreshSession() {
   const row = $('session-row');
+  if (!machine.local) { row.hidden = true; return; }
+  const id = host.id;
   try {
     const s = await host.json('/api/session');
+    if (host.id !== id) return;
     row.hidden = s.state === 'stopped' && settings.get('source') !== 'session';
     $('session-state').textContent = {
       running: `Running${s.memoryMB ? ` and using ${s.memoryMB} MB of memory` : ''}. Apps in it keep running after you disconnect.`,
@@ -513,14 +578,25 @@ async function endSession() {
 
 // ---------- quick source switch (top bar, More sheet) ----------
 
+function fillScreenSelect(id, choices, labels) {
+  $(id).replaceChildren(...choices.map((v) => new Option(labels[v], v)));
+}
+
 function syncSource() {
-  const source = settings.get('source');
+  const { sources } = screenChoices(machine);
+  const source = pictureOptions(machine, settings.get).source;
+  fillScreenSelect('quick-source', sources, SCREEN_SOURCES);
+  $('quick-source').hidden = sources.length < 2;
+  $('sheet-sources').hidden = sources.length < 2;
   $('quick-source').value = source;
-  for (const b of document.querySelectorAll('[data-source]')) b.setAttribute('aria-checked', String(b.dataset.source === source));
+  for (const b of document.querySelectorAll('[data-source]')) {
+    b.hidden = !sources.includes(b.dataset.source);
+    b.setAttribute('aria-checked', String(b.dataset.source === source));
+  }
 }
 
 function switchSource(source) {
-  if (source === settings.get('source')) return;
+  if (!screenChoices(machine).sources.includes(source) || source === pictureOptions(machine, settings.get).source) return;
   settings.set('source', source);
   if (view === 'screen') screen.reconnect();
   else screen.markStale();
@@ -580,6 +656,15 @@ async function hardReload() {
 // ---------- actions (top bar, toolbar, sheet) ----------
 
 const sheet = $('sheet');
+
+function syncInputControls() {
+  const control = machine.screen && screenPermissions.control;
+  for (const b of document.querySelectorAll('[data-action="super"], [data-action="cad"]')) b.disabled = !control;
+  for (const b of document.querySelectorAll('[data-action="clipboard"]')) b.disabled = !machine.screen || !screenPermissions.clipboard;
+  for (const b of document.querySelectorAll('[data-action="keyboard"]')) b.disabled = view === 'screen' && !control;
+  document.body.classList.toggle('screen-view-only', !control);
+  $('keyrow').inert = view === 'screen' && !control;
+}
 
 const actions = {
   clipboard: () => screen.sendClipboard(),

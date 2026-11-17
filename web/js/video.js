@@ -43,6 +43,18 @@ export function createVideo({ url, canvas, onStats, onError }) {
   let keyAskedAt = 0;
   let lastSeq = 0;
   let closed = false;
+  let failed = false;
+  let decodeErrors = 0;
+  let firstFrameTimer = null;
+
+  function fail(message) {
+    if (closed || failed) return;
+    failed = true;
+    clearTimeout(firstFrameTimer);
+    try { decoder?.close(); } catch {}
+    ws.close();
+    onError(message);
+  }
 
   const send = (obj) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); };
   const ack = (seq) => send({ type: 'ack', seq });
@@ -55,6 +67,9 @@ export function createVideo({ url, canvas, onStats, onError }) {
   }
 
   function draw(frame) {
+    if (closed || failed) { frame.close(); return; }
+    clearTimeout(firstFrameTimer);
+    decodeErrors = 0;
     const seq = frame.timestamp;
     const c = canvas();
     if (c?.width && c.height) c.getContext('2d').drawImage(frame, 0, 0, c.width, c.height);
@@ -67,30 +82,44 @@ export function createVideo({ url, canvas, onStats, onError }) {
     decoder = null;
     needKey = true;
     if (!config) return;
-    decoder = new VideoDecoder({
-      output: draw,
-      error: (err) => {
-        if (closed) return;
-        // Acknowledge what arrived so the server does not wait on lost frames,
-        // and start again from the next keyframe.
-        console.warn('video: decoder error', err);
-        ack(lastSeq);
-        reset();
-        askForKey();
-      },
-    });
-    decoder.configure({ codec: config.codec, codedWidth: config.width, codedHeight: config.height, optimizeForLatency: true });
+    try {
+      decoder = new VideoDecoder({ output: draw, error: decoderError });
+      decoder.configure({ codec: config.codec, codedWidth: config.width, codedHeight: config.height, optimizeForLatency: true });
+    } catch (err) {
+      fail(`This browser could not start the video decoder: ${err.message}`);
+    }
+  }
+
+  function decoderError(err) {
+    if (closed || failed) return;
+    // Recover an occasional bad frame, but do not retry a broken decoder forever.
+    console.warn('video: decoder error', err);
+    ack(lastSeq);
+    if (++decodeErrors >= 3) return fail('This browser could not decode the video.');
+    reset();
+    askForKey();
   }
 
   ws.onmessage = (e) => {
+    if (closed || failed) return;
     if (typeof e.data === 'string') {
       let m;
       try { m = JSON.parse(e.data); } catch { return; }
-      if (m.type === 'config') { config = m; reset(); }
+      if (!m || typeof m !== 'object') return;
+      if (m.type === 'config') {
+        if (typeof m.codec !== 'string' || !Number.isInteger(m.width) || !Number.isInteger(m.height) || m.width < 2 || m.height < 2) {
+          return fail('The machine sent an invalid video configuration.');
+        }
+        config = m;
+        reset();
+        clearTimeout(firstFrameTimer);
+        if (!failed) firstFrameTimer = setTimeout(() => fail('The video encoder is not sending a picture.'), 15000);
+      }
       else if (m.type === 'stats') onStats(m);
-      else if (m.type === 'error') onError(m.message);
+      else if (m.type === 'error') fail(typeof m.message === 'string' ? m.message : 'The video encoder failed.');
       return;
     }
+    if (!(e.data instanceof ArrayBuffer) || e.data.byteLength < 8) return fail('The machine sent an invalid video frame.');
     const view = new DataView(e.data);
     const seq = view.getUint32(0, true);
     const key = view.getUint8(4) === 1;
@@ -101,15 +130,19 @@ export function createVideo({ url, canvas, onStats, onError }) {
       return;
     }
     needKey = false;
-    decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: seq, data: new Uint8Array(e.data, 8) }));
+    try {
+      decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: seq, data: new Uint8Array(e.data, 8) }));
+    } catch (err) { decoderError(err); }
   };
   ws.onclose = () => {
-    if (!closed) onError('The video connection closed.');
+    if (!closed && !failed) fail('The video connection closed.');
   };
+  ws.onerror = () => fail('The video connection failed.');
 
   return {
     close() {
       closed = true;
+      clearTimeout(firstFrameTimer);
       try { decoder?.close(); } catch {}
       ws.close();
     },

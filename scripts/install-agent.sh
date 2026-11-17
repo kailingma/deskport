@@ -10,6 +10,7 @@
 #   --binary <path>   install this build instead of downloading one
 #   --rejoin          join again although this machine already joined a hub
 #   --no-tmux         do not offer to install tmux
+#   --no-screen       do not offer to install the screen's GStreamer packages
 #
 # The hub fills in its own address when it serves this script, so the hub
 # argument is only needed from a checkout. A join token comes from Machines,
@@ -32,10 +33,11 @@ NAME=""
 BINARY=""
 REJOIN=0
 TMUX_OFFER=1
+SCREEN_OFFER=1
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'deskport-agent install: %s\n' "$*" >&2; exit 1; }
-usage() { die "usage: install-agent.sh [<hub url>] [<join token>] [--name <name>] [--binary <path>] [--rejoin] [--no-tmux]"; }
+usage() { die "usage: install-agent.sh [<hub url>] [<join token>] [--name <name>] [--binary <path>] [--rejoin] [--no-tmux] [--no-screen]"; }
 # Questions go to the terminal: stdin is this script when it is piped into sh.
 ask() {
   { printf '%s' "$1" > /dev/tty; } 2>/dev/null || return 1
@@ -48,6 +50,7 @@ while [ $# -gt 0 ]; do
     --binary) BINARY=${2:?--binary needs a path}; shift 2 ;;
     --rejoin) REJOIN=1; shift ;;
     --no-tmux) TMUX_OFFER=0; shift ;;
+    --no-screen) SCREEN_OFFER=0; shift ;;
     -h|--help) usage ;;
     http://*|https://*) HUB=$1; shift ;;
     -*) usage ;;
@@ -131,6 +134,42 @@ if ! command -v tmux >/dev/null 2>&1 && [ "$TMUX_OFFER" -eq 1 ]; then
     sudo sh -c "$PKG" || say "note: '$PKG' failed; the terminal needs tmux"
   else
     say "note: tmux is not installed; the terminal needs it: sudo $PKG"
+  fi
+fi
+
+# ---------- GStreamer, for the screen ----------
+
+# The screen of a Wayland desktop (KDE Plasma, GNOME and others) goes through
+# the desktop portal with the system's Python and GStreamer
+# (scripts/portal-screen.py, which lists the same packages). Offered only
+# where a Wayland desktop is installed; servers are left alone.
+screen_ready() {
+  python3 - <<'PY' >/dev/null 2>&1
+import gi
+gi.require_version("Gst", "1.0")
+gi.require_version("GstVideo", "1.0")
+from gi.repository import Gst
+Gst.init(None)
+need = ["pipewiresrc", "videoconvert", "videoscale", "appsrc", "appsink", "jpegenc", "h264parse"]
+raise SystemExit(0 if all(Gst.ElementFactory.find(e) for e in need) else 1)
+PY
+}
+if [ "$SCREEN_OFFER" -eq 1 ] && [ "$OS" = linux ] && command -v python3 >/dev/null 2>&1 \
+  && ls /usr/share/wayland-sessions/*.desktop >/dev/null 2>&1 && ! screen_ready; then
+  PKG=""
+  if command -v apt-get >/dev/null 2>&1; then PKG="apt-get install -y python3-gi gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly"
+  elif command -v dnf >/dev/null 2>&1; then PKG="dnf install -y python3-gobject gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-free pipewire-gstreamer gstreamer1-plugin-openh264"
+  elif command -v pacman >/dev/null 2>&1; then PKG="pacman -S --needed --noconfirm python-gobject gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugin-pipewire gst-plugins-ugly"
+  elif command -v zypper >/dev/null 2>&1; then PKG="zypper install -y python3-gobject typelib-1_0-Gst-1_0 gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugins-bad gstreamer-plugin-pipewire gstreamer-plugins-ugly"
+  fi
+  if [ -z "$PKG" ]; then
+    say "note: the screen needs python3-gi and GStreamer with its PipeWire plugin; the hub shows what is missing"
+  elif [ "$(id -u)" -eq 0 ]; then
+    sh -c "$PKG" || say "note: '$PKG' failed; the screen needs these packages"
+  elif command -v sudo >/dev/null 2>&1 && ask "The screen needs GStreamer packages. Install them with 'sudo $PKG'? [Y/n] " && [ "${REPLY:-y}" != n ] && [ "${REPLY:-y}" != N ]; then
+    sudo sh -c "$PKG" || say "note: '$PKG' failed; the screen needs these packages"
+  else
+    say "note: the screen needs: sudo $PKG"
   fi
 fi
 

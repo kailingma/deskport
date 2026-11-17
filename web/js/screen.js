@@ -3,13 +3,14 @@ import { settings } from './settings.js';
 import { KS, keysymFor, takeMods } from './keys.js';
 import { createScroller, touchMid, touchDist } from './gestures.js';
 import { createVideo, videoSupport } from './video.js';
+import { pictureOptions, portalPermissions } from './screen-options.js';
 
 const $ = (id) => document.getElementById(id);
 const LONG_PRESS_MS = 450;
 const MOVE_SLOP = 10;
 
 /**
- * The Screen view: RDP through guacd, drawn by guacamole-common-js.
+ * The Screen view: Guacamole instructions from guacd or a joined agent.
  *
  * Touch, handled here instead of by Guacamole's own touch modes:
  *   tap                      left click
@@ -28,7 +29,7 @@ const MAX_DROPS = 5;
 const NATIVE_SLACK = 16;
 const STABLE_MS = 10000;
 
-export function createScreen({ host, setStatus, toast }) {
+export function createScreen({ host, setStatus, toast, machine, onPermissions = () => {} }) {
   const wrap = $('display-wrap');
   const ime = $('screen-ime');
   const ring = $('touch-ring');
@@ -51,6 +52,18 @@ export function createScreen({ host, setStatus, toast }) {
   let encodingInUse = 'images';
   let imagesInstead = false;
   let warnedUnsupported = '';
+  let notice = '';
+  let permissions = { control: true, clipboard: true };
+  let connectAttempt = 0;
+
+  function setPermissions(next) {
+    permissions = next;
+    onPermissions(next);
+  }
+
+  function connectedStatus() {
+    setStatus('screen', permissions.waiting ? 'busy' : 'ok', permissions.waiting ? 'Awaiting approval' : permissions.control ? 'Connected' : 'View only');
+  }
 
   const overlay = (title, body) => {
     $('screen-overlay-title').textContent = title;
@@ -102,7 +115,7 @@ export function createScreen({ host, setStatus, toast }) {
   }
 
   function mouse(clientX, clientY, buttons = {}) {
-    if (!client) return;
+    if (!client || !permissions.control) return;
     client.sendMouseState({ ...remotePos(clientX, clientY), ...buttons });
   }
 
@@ -190,7 +203,7 @@ export function createScreen({ host, setStatus, toast }) {
       const p = t[0];
       g = { kind: 'one', x0: p.clientX, y0: p.clientY, x: p.clientX, y: p.clientY, lastX: p.clientX, lastY: p.clientY, mode: null };
       g.timer = setTimeout(() => {
-        if (g?.kind === 'one' && !g.mode) {
+        if (g?.kind === 'one' && !g.mode && permissions.control) {
           g.mode = 'armed';
           showRing(g.x0, g.y0, 'armed');
         }
@@ -324,9 +337,16 @@ export function createScreen({ host, setStatus, toast }) {
   });
 
   function connect() {
-    const wanted = imagesInstead ? 'images' : settings.get('encoding');
+    clearTimeout(dropTimer);
+    waitingForWake = false;
+    disconnect();
+    const attempt = connectAttempt;
+    wantConnected = true;
+    const options = pictureOptions(machine(), settings.get);
+    const portal = machine().screenBackend === 'portal';
+    const wanted = imagesInstead ? 'images' : options.encoding;
     if (wanted !== 'images' && !decodes) {
-      videoSupport().then(connect);
+      videoSupport().then(() => { if (wantConnected && attempt === connectAttempt) connect(); });
       return;
     }
     const encoding = wanted === 'images' || decodes[wanted] ? wanted : 'images';
@@ -334,14 +354,11 @@ export function createScreen({ host, setStatus, toast }) {
       warnedUnsupported = wanted;
       toast(`This browser cannot decode ${wanted === 'av1' ? 'AV1' : 'H.264'} video, so the screen is sent as images`);
     }
-    clearTimeout(dropTimer);
-    waitingForWake = false;
-    disconnect();
     encodingInUse = encoding;
-    wantConnected = true;
     stale = false;
     zoom = 1;
     $('screen-overlay').hidden = true;
+    setPermissions({ control: !portal, clipboard: !portal });
 
     const tunnel = new Guacamole.WebSocketTunnel(host.ws('/ws/screen'));
     // The tunnel pings every 500 ms; nothing back for this long means the link is gone.
@@ -361,6 +378,12 @@ export function createScreen({ host, setStatus, toast }) {
       overlay('Disconnected', lostLink ? 'The connection to the computer was lost.' : 'The remote desktop session ended.');
     };
     client = c;
+    // Portal approval happens after pairing. Attach video as soon as its id
+    // arrives, so even a pipeline that fails before its first sync can report
+    // an error and fall back to images. The hub keeps its existing lifecycle.
+    if (portal && encoding !== 'images') tunnel.onuuid = () => {
+      if (client === c && wantConnected && !video) startVideo(c, tunnel);
+    };
     const display = c.getDisplay();
     const el = display.getElement();
     wrap.replaceChildren(el);
@@ -369,7 +392,7 @@ export function createScreen({ host, setStatus, toast }) {
       switch (state) {
         case 1: case 2: setStatus('screen', 'busy', 'Connecting'); break;
         case 3:
-          setStatus('screen', 'ok', 'Connected');
+          connectedStatus();
           if (encoding !== 'images' && !video) startVideo(c, tunnel);
           setTimeout(() => { if (client === c) drops = 0; }, STABLE_MS);
           // GNOME desktop sharing can accept a session and then send no picture.
@@ -377,8 +400,9 @@ export function createScreen({ host, setStatus, toast }) {
             if (client === c && wantConnected && !c.getDisplay().getWidth()) {
               setStatus('screen', 'bad', 'No picture');
               overlay('No picture from the desktop',
-                'GNOME desktop sharing accepted the connection but is not sending the screen. '
-                + 'Restart it on the host with: systemctl --user restart gnome-remote-desktop');
+                portal ? 'The shared screen is not sending a picture. Check the sharing session at this machine, then reconnect.'
+                  : 'GNOME desktop sharing accepted the connection but is not sending the screen. '
+                    + 'Restart it on the host with: systemctl --user restart gnome-remote-desktop');
             }
           }, 12000);
           break;
@@ -394,15 +418,27 @@ export function createScreen({ host, setStatus, toast }) {
       setStatus('screen', 'bad', 'Error');
       overlay('Could not connect', st.message || `Guacamole status ${st.code}`);
       wantConnected = false;
+      $('screen-notice').hidden = true;
+    };
+    c.onname = (text) => {
+      if (!portal || client !== c) return;
+      const changed = text !== notice;
+      notice = text;
+      setPermissions(portalPermissions(text));
+      $('screen-notice').textContent = text;
+      $('screen-notice').hidden = !text;
+      connectedStatus();
+      if (text && changed) toast(text, { ms: 8000 });
     };
     display.onresize = rescale;
 
     c.onclipboard = (stream, mimetype) => {
-      if (!/^text\//.test(mimetype)) return;
+      if (client !== c || !/^text\//.test(mimetype)) return;
       const reader = new Guacamole.StringReader(stream);
       let text = '';
       reader.ontext = (t) => { text += t; };
       reader.onend = () => {
+        if (client !== c) return;
         navigator.clipboard?.writeText(text).then(() => toast('Copied from the remote desktop'), () => {});
       };
     };
@@ -410,21 +446,22 @@ export function createScreen({ host, setStatus, toast }) {
     // Mouse only; touch is handled above.
     const m = new Guacamole.Mouse(el);
     m.onEach(['mousedown', 'mouseup', 'mousemove', 'mousewheel'], (ev) => {
+      if (client !== c || !permissions.control) return;
       wrap.focus({ preventScroll: true });
       c.sendMouseState(ev.state, true);
     });
     m.on('mouseout', () => display.showCursor(false));
 
     keyboard = new Guacamole.Keyboard(wrap);
-    keyboard.onkeydown = (keysym) => { client?.sendKeyEvent(1, keysym); return false; };
-    keyboard.onkeyup = (keysym) => { client?.sendKeyEvent(0, keysym); };
+    keyboard.onkeydown = (keysym) => { if (permissions.control) client?.sendKeyEvent(1, keysym); return false; };
+    keyboard.onkeyup = (keysym) => { if (permissions.control) client?.sendKeyEvent(0, keysym); };
 
     // Device pixels to fill. On touch screens leave room to pinch-zoom 2x and stay
     // sharp, except for an extra monitor or separate desktop, which GNOME makes
     // at exactly this size.
     const ratio = window.devicePixelRatio || 1;
-    const matched = settings.get('source') === 'mirror' && settings.get('matchMonitor');
-    const sized = settings.get('source') !== 'mirror' || matched;
+    const matched = options.matchMonitor;
+    const sized = options.source !== 'mirror' || matched;
     const headroom = !sized && matchMedia('(pointer: coarse)').matches ? 2 : 1;
     const width = Math.round(wrap.clientWidth * ratio * headroom);
     const height = Math.round(wrap.clientHeight * ratio * headroom);
@@ -437,11 +474,11 @@ export function createScreen({ host, setStatus, toast }) {
       quality: settings.get('quality'),
       priority: settings.get('priority'),
       res: settings.get('resolution'),
-      source: settings.get('source'),
+      source: options.source,
       ...(encoding !== 'images' ? { encoding, speed: String(settings.get('encSpeed')), bitrate: settings.get('bitrate') } : {}),
-      ...(encoding !== 'images' && settings.get('source') === 'session' && settings.get('direct') ? { path: 'direct' } : {}),
+      ...(encoding !== 'images' && options.direct ? { path: 'direct' } : {}),
       ...(matched ? { match: '1' } : {}),
-      ...(settings.get('monitor') !== 'primary' ? { monitor: settings.get('monitor') } : {}),
+      ...(options.monitor !== 'primary' ? { monitor: options.monitor } : {}),
     });
     c.connect(params.toString());
   }
@@ -463,6 +500,11 @@ export function createScreen({ host, setStatus, toast }) {
   }
 
   function disconnect() {
+    connectAttempt++;
+    clearTimeout(dropTimer);
+    clearTimeout(resizeTimer);
+    waitingForWake = false;
+    cancelGesture();
     video?.close();
     video = null;
     videoStats = null;
@@ -471,16 +513,19 @@ export function createScreen({ host, setStatus, toast }) {
     if (keyboard) keyboard.onkeydown = keyboard.onkeyup = null;
     keyboard = null;
     if (client) {
-      client.onstatechange = client.onerror = null;
+      client.onstatechange = client.onerror = client.onname = client.onclipboard = null;
       try { client.disconnect(); } catch {}
     }
     client = null;
+    notice = '';
+    $('screen-notice').hidden = true;
+    setPermissions({ control: true, clipboard: true });
   }
 
   // ---------- keys ----------
 
   function chord(...keys) {
-    if (!client) return;
+    if (!client || !permissions.control) return;
     for (const k of keys) client.sendKeyEvent(1, k);
     for (const k of [...keys].reverse()) client.sendKeyEvent(0, k);
   }
@@ -508,6 +553,8 @@ export function createScreen({ host, setStatus, toast }) {
 
   async function sendClipboard() {
     if (!client) return;
+    if (!permissions.clipboard) { toast('Clipboard sharing is not available in this screen session'); return; }
+    const c = client;
     let text;
     try {
       text = await navigator.clipboard.readText();
@@ -515,7 +562,8 @@ export function createScreen({ host, setStatus, toast }) {
       toast('The browser blocked clipboard access');
       return;
     }
-    const stream = client.createClipboardStream('text/plain');
+    if (client !== c || !permissions.clipboard) return;
+    const stream = c.createClipboardStream('text/plain');
     const writer = new Guacamole.StringWriter(stream);
     writer.sendText(text);
     writer.sendEnd();
@@ -536,7 +584,7 @@ export function createScreen({ host, setStatus, toast }) {
     kbWasOpen = kbOpen;
     if (settings.get('kbResize') === 'keep' && (kbOpen || kbChanged)) return;
     rescale();
-    if (!client || settings.get('source') === 'mirror') return;
+    if (!client || pictureOptions(machine(), settings.get).source === 'mirror') return;
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const ratio = window.devicePixelRatio || 1;
@@ -551,6 +599,8 @@ export function createScreen({ host, setStatus, toast }) {
   return {
     ensureConnected() { if (!client || stale) connect(); },
     markStale() { stale = true; imagesInstead = false; },
+    /** Closes the connection to a machine no longer shown; the next visit reconnects. */
+    close() { disconnect(); stale = true; imagesInstead = false; setStatus('screen', 'idle', 'Idle'); },
     /** Closes the connection, for a machine that has no screen. */
     stop() { disconnect(); stale = true; setStatus('screen', 'idle', 'No screen'); },
     reconnect() { drops = 0; imagesInstead = false; connect(); },

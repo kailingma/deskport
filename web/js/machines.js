@@ -175,7 +175,7 @@ const meter = (value, label) => el('div', { class: 'meter', role: 'meter', 'aria
 
 // ---------- the view ----------
 
-export function createMachines({ open, toast, currentId, onList }) {
+export function createMachines({ open, toast, currentId, onList, watchSelected = () => false }) {
   const view = $('view-machines');
   const listEl = $('machine-list');
   const detailEl = $('machine-detail');
@@ -188,6 +188,7 @@ export function createMachines({ open, toast, currentId, onList }) {
   let listTimer = null;
   let liveTimer = null;
   let visible = false;
+  let refreshing = false;
 
   sortSel.replaceChildren(...Object.entries(SORTS).map(([v, label]) => new Option(label, v)));
 
@@ -255,15 +256,22 @@ export function createMachines({ open, toast, currentId, onList }) {
   }
 
   async function refresh() {
+    if (refreshing) return;
+    refreshing = true;
     try {
       machines = await hub.json('/api/hosts');
       loaded = true;
       onList?.(machines, null);
     } catch (err) {
       onList?.(machines, err);
+    } finally {
+      refreshing = false;
     }
-    render();
+    if (visible) render();
   }
+
+  const pollList = () => { if (!document.hidden && (visible || watchSelected())) refresh(); };
+  document.addEventListener('visibilitychange', pollList);
 
   // ---------- own order: drag the grip, or arrow keys on it ----------
 
@@ -346,7 +354,7 @@ export function createMachines({ open, toast, currentId, onList }) {
     linux: {
       where: 'On the machine, as the user the agent should run as, run:',
       command: (origin, token) => `curl -fsSL ${origin}/agent/v1/install.sh | sh -s -- ${token}`,
-      needs: 'It needs curl, and tmux for its terminal. It installs deskport-agent as a systemd user service and shows up here when it connects.',
+      needs: 'It needs curl, and tmux for its terminal. Screen sharing needs a signed-in Wayland desktop (KDE Plasma or GNOME), a remote desktop portal, Python and GStreamer; the installer offers the capture packages. It installs a systemd user service and shows up here when it connects.',
     },
     windows: {
       where: 'On the machine, in PowerShell as the user the agent should run as (not as administrator), run:',
@@ -618,13 +626,11 @@ export function createMachines({ open, toast, currentId, onList }) {
     show() {
       visible = true;
       refresh();
-      clearInterval(listTimer);
-      listTimer = setInterval(() => { if (!document.hidden) refresh(); }, LIST_MS);
+      listTimer ??= setInterval(pollList, LIST_MS);
       if (detail) showDetail(detail.id);
     },
     hide() {
       visible = false;
-      clearInterval(listTimer);
       clearInterval(liveTimer);
     },
     refresh,
