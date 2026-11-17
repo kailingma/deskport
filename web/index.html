@@ -391,10 +391,15 @@
   <dialog class="confirm add-machine" id="add-machine" aria-labelledby="add-title">
     <div class="dialog-card">
       <h2 class="dialog-title" id="add-title">Add a machine</h2>
-      <p class="dialog-body">On the machine, as the user the agent should run as, run:</p>
+      <div class="segmented segmented-sm add-os" role="radiogroup" aria-label="System">
+        <button type="button" role="radio" data-add-os="linux" aria-checked="true">Linux</button>
+        <button type="button" role="radio" data-add-os="windows" aria-checked="false">Windows</button>
+      </div>
+      <p class="dialog-body" id="add-where">On the machine, as the user the agent should run as, run:</p>
       <pre class="add-command" id="add-command"></pre>
       <p class="dialog-body add-note" id="add-expiry"></p>
-      <p class="dialog-body add-note">It needs curl, and tmux for its terminal. It installs deskport-agent as a systemd user service and shows up here when it connects. Through Cloudflare, the hub's <code>/agent/*</code> path needs its own Access application with a Bypass policy (docs/setup.md, step 9).</p>
+      <p class="dialog-body add-note" id="add-needs"></p>
+      <p class="dialog-body add-note">Through Cloudflare, the hub's <code>/agent/*</code> path needs its own Access application with a Bypass policy (docs/setup.md, step 9).</p>
       <div class="dialog-actions">
         <button class="btn-text" type="button" data-add="copy">Copy</button>
         <button class="btn-primary" type="button" data-add="close">Done</button>

@@ -8,7 +8,11 @@ import path from 'node:path';
 // SHA-256 and a signature with the hub's release key. The key is made on
 // first start and kept in release.key in the config directory (mode 600).
 
-export const PLATFORMS = { 'linux-x86_64': 'x86_64-unknown-linux-musl', 'linux-aarch64': 'aarch64-unknown-linux-musl' };
+export const PLATFORMS = {
+  'linux-x86_64': 'x86_64-unknown-linux-musl',
+  'linux-aarch64': 'aarch64-unknown-linux-musl',
+  'windows-x86_64': 'x86_64-pc-windows-gnu',
+};
 
 /** Compares dotted version numbers: <0, 0 or >0. */
 export function compareVersions(a, b) {
@@ -54,7 +58,8 @@ export function createReleases({ root, keyFile, log, buildDir = path.join(root, 
 
     fileFor(platform) {
       const triple = PLATFORMS[platform];
-      const file = triple && path.join(buildDir, triple, 'release/deskport-agent');
+      const name = platform.startsWith('windows-') ? 'deskport-agent.exe' : 'deskport-agent';
+      const file = triple && path.join(buildDir, triple, 'release', name);
       return file && fs.existsSync(file) ? file : null;
     },
 

@@ -44,3 +44,19 @@ test('builds are signed with the release key and offered to older agents only', 
   assert.equal(again.publicKey, rel.publicKey);
   fs.rmSync(dir, { recursive: true });
 });
+
+test('the Windows build is the .exe of the windows-gnu target', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deskport-rel-'));
+  const buildDir = path.join(dir, 'target');
+  const exe = path.join(buildDir, 'x86_64-pc-windows-gnu/release/deskport-agent.exe');
+  fs.mkdirSync(path.dirname(exe), { recursive: true });
+  fs.writeFileSync(exe, 'MZ not really an agent');
+  const rel = createReleases({ root, keyFile: path.join(dir, 'release.key'), buildDir, log: () => {} });
+  assert.equal(rel.fileFor('windows-x86_64'), exe);
+  assert.equal(rel.fileFor('linux-x86_64'), null);
+  const offer = rel.offerFor({ agent: { os: 'windows', arch: 'x86_64', version: '0.0.1' } });
+  assert.equal(offer.path, '/agent/v1/download/windows-x86_64');
+  const key = crypto.createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: rel.publicKey }, format: 'jwk' });
+  assert.ok(crypto.verify(null, buildMessage('windows-x86_64', offer.version, offer.sha256), key, Buffer.from(offer.signature, 'base64url')));
+  fs.rmSync(dir, { recursive: true });
+});

@@ -72,12 +72,16 @@ app.post('/agent/v1/join', express.json({ limit: '8kb' }), (req, res) => {
     res.status(err.status).json({ error: err.message });
   }
 });
-// The install script, and the agent's build for a platform to anyone holding
+// The install scripts (Linux and Windows), and the agent's build for a platform to anyone holding
 // a join token that is still usable (scripts/install-agent.sh) or to a joined
 // agent that signs the request (updates, docs/protocol.md).
 app.get('/agent/v1/install.sh', (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-  res.type('text/x-shellscript').sendFile(path.join(root, 'scripts/install-agent.sh'));
+  res.type('text/x-shellscript').sendFile(path.join(root, 'scripts/install-agent.sh'), { dotfiles: 'allow' });
+});
+app.get('/agent/v1/install.ps1', (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.type('text/plain; charset=utf-8').sendFile(path.join(root, 'scripts/install-agent.ps1'), { dotfiles: 'allow' });
 });
 app.get('/agent/v1/download/:platform', (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -89,7 +93,7 @@ app.get('/agent/v1/download/:platform', (req, res) => {
   if (!allowed) return res.status(401).type('text/plain').send('A join token that is still usable is required.\n');
   const file = releases.fileFor(req.params.platform);
   if (!file) return res.status(404).type('text/plain').send(`No agent build for ${req.params.platform} on this hub (npm run build:agent).\n`);
-  res.type('application/octet-stream').sendFile(file);
+  res.type('application/octet-stream').sendFile(file, { dotfiles: 'allow' });
 });
 app.use('/agent', (req, res) => res.status(404).type('text/plain').send('Not Found'));
 

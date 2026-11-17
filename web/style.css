@@ -895,6 +895,7 @@ body[data-view="machines"] .keyrow { display: none !important; }
   user-select: all;
 }
 .add-note { font-size: 12px; margin-top: 6px; }
+.add-os { margin-bottom: 12px; }
 .add-note code { font-family: var(--mono); font-size: 11px; }
 
 .empty-state {
