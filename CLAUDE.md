@@ -5,7 +5,7 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 ## Run, test, deploy
 
 - Node comes from fnm, and new shells may not have it on `PATH`. Prefix commands with `export PATH="$HOME/.local/share/fnm/aliases/default/bin:$PATH"`.
-- `npm test` runs the `node --test` suite; `npm run test:agent` runs the Rust agent's tests and `npm run build:agent` builds its static release binary (Rust is user-local: `export PATH="$HOME/.cargo/bin:$PATH"`). A Rust release build is heavy: one at a time, nothing else heavy alongside. `npm run check` syntax-checks every file in `hub/`, `shim/`, `web/` and `bench/`, the shell and Python helpers.
+- `npm test` runs the `node --test` suite; `npm run test:agent` runs the Rust agent's tests and `npm run build:agent` builds its static release binary (`build:agent:windows` the Windows one, docs/windows.md) (Rust is user-local: `export PATH="$HOME/.cargo/bin:$PATH"`). A Rust release build is heavy: one at a time, nothing else heavy alongside. `npm run check` syntax-checks every file in `hub/`, `shim/`, `web/` and `bench/`, the shell and Python helpers.
 - Dev server: `.claude/launch.json` entry `deskport-dev` (port 7901, `--watch`, Access checks off), or `deskport-test` (port 7902, tmux session `deskport-test`, safe for terminal tests). The production server is `deskport.service` on 7900.
 - The server starts the agent shim (`shim/agent.js`) as a child process that does the host work; it exits when the server does, so stopping a test server by its PID stops both. `DESKPORT_RELAY=0` runs the host work in the server's own process.
 - Deploy: `systemctl --user restart deskport`. After changing a unit or `scripts/install-services.sh`, run that script instead; it also restarts the tunnel.
@@ -44,5 +44,6 @@ Read [docs/architecture.md](docs/architecture.md) for how it fits together, [doc
 - Multi-host: the steps under "What is left" in docs/multi-host.md.
 - Separate desktop: Chromium browsers open on the main desktop while one is open there (one profile per process). A snap opened there holds its profile, so the same snap cannot start on the main desktop until it is closed.
 - Match this device (My monitor) has never been run against the physical monitor. Never turn it on in a test; only the owner does.
+- Windows agent (docs/windows.md): builds and is unit-tested on Linux, never run on Windows. There is no Windows machine or Wine here.
 - Windows XP clients: research only, docs/legacy-clients.md.
 - Video encodings (Send as AV1 or H.264): tested only on the separate desktop and in headless Chromium. Not yet run on My monitor or an extra monitor, or decoded on an iPhone or in Safari. `scripts/video-encoder.py` exits with `os._exit`: GStreamer encoders here (svtav1enc at least) hang on a clean shutdown.

@@ -134,7 +134,7 @@ Other machines join this one, the hub, with deskport-agent ([agent.md](agent.md)
 
 1. In Zero Trust, Access, Applications, add a second Self-hosted application with the same domain and the path `agent/*`.
 2. Give it one policy with action **Bypass** and an Include rule of Everyone. Access then lets these requests through, and deskport checks them itself: a join token for joining and downloading the agent, and the machine's own key for everything else (protocol.md, "Signed connections"). deskport serves nothing but the agent protocol under `/agent/`.
-3. Build the agent on the hub, so the hub can hand it out: install Rust (`curl https://sh.rustup.rs -sSf | sh`), then `npm run build:agent`. The build is a static binary for x86_64 Linux.
+3. Build the agent on the hub, so the hub can hand it out: install Rust (`curl https://sh.rustup.rs -sSf | sh`), then `npm run build:agent`. The build is a static binary for x86_64 Linux. For Windows machines, also `rustup target add x86_64-pc-windows-gnu` and `npm run build:agent:windows` (needs `uv`, which fetches Zig once).
 
 Then, for each machine, open Machines in the page and choose Add machine. It shows a command with a join token that works once, within 15 minutes:
 
@@ -143,6 +143,14 @@ curl -fsSL https://desk.example.com/agent/v1/install.sh | sh -s -- https://desk.
 ```
 
 The machine needs `curl`, and `tmux` for its terminal. It appears under Machines when it connects.
+
+For a Windows machine (Windows 10 1809 or later), choose Windows in the dialog and run its command in PowerShell as the user, not as administrator:
+
+```powershell
+& ([scriptblock]::Create((irm https://desk.example.com/agent/v1/install.ps1))) https://desk.example.com <join token>
+```
+
+It installs the agent under `%LOCALAPPDATA%\Programs\deskport-agent` and a scheduled task that starts it at each logon; its terminal is PowerShell ([windows.md](windows.md)). The Windows agent has not yet been run on a real Windows machine.
 
 ## Troubleshooting
 

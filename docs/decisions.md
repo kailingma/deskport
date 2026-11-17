@@ -2,6 +2,21 @@
 
 Choices made while building deskport, newest first, with the reason for each. Entries marked *autonomous* were made while the owner was away and asked for choices to be made and logged.
 
+## 2026-11-16
+
+### Windows agent without a screen (roadmap phase 7, first part)
+The agent builds for x86_64 Windows with metrics, a ConPTY terminal, joining, updates, a runner at logon and uninstall; `scripts/install-agent.ps1` (served as `/agent/v1/install.ps1`) installs it, and Add machine has a Windows choice. Nothing has run on Windows: there is no Windows machine or Wine here. What was checked on Linux is listed in windows.md, "What has been checked". The screen is designed there and not built.
+
+Choices (*autonomous*):
+- **Cross-compiled with cargo-zigbuild for `x86_64-pc-windows-gnu`**, as for aarch64 Linux, because mingw-w64 is not installed and installing it needs sudo. Zig compiles ring and links; the result needs only DLLs that ship with Windows 10. The MSVC target would need the Windows SDK's libraries (cargo-xwin downloads them under Microsoft's licence), so it was not tried. An Arm build does not link with Zig (no unwinder for `aarch64-pc-windows-gnullvm`), so Windows on Arm uses the x86_64 build under emulation for now.
+- **`windows-sys` for the system calls**, already in the dependency tree through tokio, rather than a crate such as sysinfo or portable-pty: the agent needs a dozen calls, and the Linux side reads `/proc` directly too.
+- **A scheduled task at logon, not a Windows service**, as the task asked: a service runs in session 0, where neither the user's shell nor a later screen capture belongs. The cost is that the agent runs only while the user is logged on. A service that starts a helper in the console session is the later step for the lock screen and UAC prompts (windows.md, Screen).
+- **The agent restarts itself with `deskport-agent service`**, a runner inside the same binary, instead of Task Scheduler's restart setting, whose handling of exit statuses could not be checked here and which has no way to say "do not restart after 3". It keeps the Linux unit's rules (75 at once, 3 never, else 5 s) and puts itself in a job object so ending the task ends the agent and its shells.
+- **`conhost.exe --headless` hides the console window.** The agent stays one console program so `join`, `version` and `uninstall` print to the terminal they are run from. `--headless` is the mode the pseudo console uses and is not documented for direct use; windows.md names the fallback (a Windows-subsystem build of the runner) if it shows a window.
+- **The terminal keeps one shell per agent that outlives connections** and replays the last 256 KB to a new one, instead of a shell per connection, because the page reconnects often on a phone and a shell per connection would lose its state each time. Several connections share the shell, as tmux clients do. A connection that falls far behind is closed (1013) and reconnects with the replay, rather than slowing the shell for every viewer, which is what tmux avoids too. A connection taking over from the previous one was rejected: the page reconnects on every close, so two open pages would take it from each other in a loop.
+- **Commit instead of swap** in the memory sample (`commitB`, `commitLimitB`, protocol.md): Windows has no separate swap total that means the same thing, and the dashboard shows commit when it is present.
+- **`dotfiles: 'allow'` on the hub's agent file routes.** Express's `sendFile` refused the install script and builds when the checkout's path has a dot directory (this worktree is under `~/.t3/`); the paths are fixed by the hub, not taken from the request.
+
 ## 2026-11-14
 
 ### My monitor while the screen is locked
