@@ -11,15 +11,15 @@ import { ALL, AccessError } from './access.js';
  *   GET    /api/host           the machine's id, name, version and capabilities
  *   GET    /api/hosts          the machines the signed-in person may use
  *   DELETE /api/hosts/:id      remove a machine that joined (admin, same-origin only)
- *   POST   /api/join-tokens    a one-use token for joining a machine (admin, same-origin only)
+ *   POST   /api/join-tokens    a one-use token (allowed to add machines, same-origin only)
  *   GET    /api/admin/people   admins, people and their machines, and every machine (admin)
- *   PUT    /api/admin/people/:email  { machines: [ids] or ["*"] } (admin, same-origin only)
+ *   PUT    /api/admin/people/:email  { machines, readMachines, addMachines } (admin, same-origin only)
  *   DELETE /api/admin/people/:email  (admin, same-origin only)
  *   GET    /api/prefs         the signed-in person's machine order, list or grid, and sort
  *   PUT    /api/prefs         change them (same-origin only)
  *   GET    /api/metrics        the machine's recent metrics (?since=<ms>&live=1)
  *   GET    /api/session        state of the separate desktop
- *   POST   /api/session/stop   end the separate desktop (same-origin only)
+ *   POST   /api/session/stop   end the separate desktop (Edit, same-origin only)
  *   GET    /api/monitors       the physical monitors My monitor can show
  *   GET    /api/files/:token/:name  a file opened with xdg-open in the terminal
  *
@@ -32,16 +32,20 @@ export function createApi({ hosts, registry, prefs, machines, access }) {
   const sameOriginOnly = (req, res, next) => (sameOrigin(req) ? next() : res.status(403).json({ error: 'cross-origin request' }));
   const adminOnly = (req, res, next) => (access.isAdmin(req.user.email) ? next() : res.status(403).json({ error: 'only an admin can do this' }));
   const mine = (req, res, next) => (access.canUse(req.user.email, req.machine.id) ? next() : res.status(403).json({ error: 'you have not been given this machine' }));
+  const editOnly = (req, res, next) => (access.canEdit(req.user.email, req.machine.id) ? next() : res.status(403).json({ error: 'Edit access is required to control this machine' }));
+  const addOnly = (req, res, next) => (access.canAddMachines(req.user.email) ? next() : res.status(403).json({ error: 'an admin must allow you to add machines' }));
+  const level = (email, id) => (access.canEdit(email, id) ? 'edit' : 'read');
 
   api.get('/api/me', (req, res) => {
     noStore(res).json({
       email: req.user.email, host: hosts.self.name, hostId: hosts.self.id, dev: Boolean(req.user.dev),
       admin: access.isAdmin(req.user.email),
+      canAddMachines: access.canAddMachines(req.user.email),
     });
   });
 
   api.get('/api/host', mine, (req, res) => {
-    noStore(res).json(req.machine.describe());
+    noStore(res).json({ ...req.machine.describe(), access: level(req.user.email, req.machine.id) });
   });
 
   // Every machine with what the machine list shows: status, what it offers,
@@ -66,6 +70,7 @@ export function createApi({ hosts, registry, prefs, machines, access }) {
     const self = machines.self.describe();
     const list = access.canUse(email, self.id) ? [{
       id: self.id, name: self.name, local: true, status: 'online', os: 'linux',
+      access: level(email, self.id),
       screen: true, terminal: true, ...screenFields(self.capabilities, ['images', 'av1', 'h264']), ...registry.summary(self.id),
     }] : [];
     for (const m of registry.list()) {
@@ -73,6 +78,7 @@ export function createApi({ hosts, registry, prefs, machines, access }) {
       const caps = machines.get(m.id).describe().capabilities;
       list.push({
         ...m, local: false, screen: Boolean(caps?.screen), terminal: caps ? Boolean(caps.terminal) : true,
+        access: level(email, m.id),
         ...screenFields(caps), ...registry.summary(m.id),
       });
     }
@@ -85,8 +91,8 @@ export function createApi({ hosts, registry, prefs, machines, access }) {
     noStore(res).json({ removed: req.params.id });
   });
 
-  api.post('/api/join-tokens', adminOnly, sameOriginOnly, (req, res) => {
-    noStore(res).json(registry.mintToken());
+  api.post('/api/join-tokens', addOnly, sameOriginOnly, (req, res) => {
+    noStore(res).json(registry.mintToken(req.user.email));
   });
 
   api.get('/api/admin/people', adminOnly, (req, res) => {
@@ -95,7 +101,10 @@ export function createApi({ hosts, registry, prefs, machines, access }) {
 
   api.put('/api/admin/people/:email', adminOnly, sameOriginOnly, express.json({ limit: '32kb' }), (req, res) => {
     try {
-      noStore(res).json(access.setPerson(req.params.email, req.body?.machines));
+      noStore(res).json(access.setPerson(req.params.email, req.body?.machines, {
+        readMachines: req.body?.readMachines,
+        addMachines: req.body?.addMachines,
+      }));
     } catch (err) {
       if (!(err instanceof AccessError)) throw err;
       res.status(400).json({ error: err.message });
@@ -131,7 +140,7 @@ export function createApi({ hosts, registry, prefs, machines, access }) {
     }
   };
   api.get('/api/session', mine, forward('GET', '/api/session'));
-  api.post('/api/session/stop', mine, forward('POST', '/api/session/stop'));
+  api.post('/api/session/stop', editOnly, forward('POST', '/api/session/stop'));
   api.get('/api/monitors', mine, forward('GET', '/api/monitors'));
 
   api.get('/api/files/:token/:name', mine, (req, res) => req.machine.file(req, res));

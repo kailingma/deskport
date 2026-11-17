@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { PROTOCOL, SUBPROTOCOL, AGENT_PREFIX, createUpgradeVerifier, publicKeyFrom, relayCloseCode } from './protocol.js';
+import { createReadOnlyFilter, readOnlyQuery } from '../shim/readonly.js';
 
 // The hub's side of docs/protocol.md: agents' keys, their control sockets,
 // API requests over them, and the relay between a browser's socket and the
@@ -23,7 +24,7 @@ const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** Known capability fields are typed; unknown fields stay available to newer agents. */
 function validCapabilities(caps) {
   if (!object(caps)) return false;
-  for (const key of ['terminal', 'files', 'metrics']) {
+  for (const key of ['terminal', 'files', 'metrics', 'readOnly']) {
     if (key in caps && typeof caps[key] !== 'boolean') return false;
   }
   if (caps.screen !== undefined && caps.screen !== null) {
@@ -45,11 +46,15 @@ function closeLike(ws, code, reason) {
   else ws.close(c, Buffer.isBuffer(reason) ? reason.toString() : reason || '');
 }
 
-/** Copies every message both ways, unchanged, and closes each side like the other. */
-function pair(browser, agent) {
-  browser.on('message', (data, isBinary) => { if (sendable(agent)) agent.send(data, { binary: isBinary }); });
+/** Copies output unchanged, filters input when needed, and relays closes. */
+function pair(browser, agent, filterInput) {
+  browser.on('message', (data, isBinary) => {
+    const filtered = filterInput(data, isBinary);
+    if (filtered !== null && sendable(agent)) agent.send(filtered, { binary: isBinary });
+  });
   agent.on('message', (data, isBinary) => { if (sendable(browser)) browser.send(data, { binary: isBinary }); });
   browser.on('close', (code, reason) => closeLike(agent, code, reason));
+  browser.on('access-changed', (code, reason) => closeLike(agent, code, reason));
   agent.on('close', (code, reason) => closeLike(browser, code, reason));
   browser.on('error', () => {});
   agent.on('error', () => {});
@@ -204,7 +209,7 @@ export function createAgentHub({ log, version }) {
       }
       const m = /^\/agent\/v1\/stream\/([^/]+)$/.exec(pathname);
       const pending = m && STREAM_ID.test(m[1]) ? pendingStreams.get(m[1]) : null;
-      if (!pending || pending.agentId !== id) return reject(404, 'Not Found');
+      if (!pending || pending.agentId !== id || !pending.active()) return reject(404, 'Not Found');
       wss.handleUpgrade(req, socket, head, (ws) => pending.attach(ws));
     },
 
@@ -212,16 +217,20 @@ export function createAgentHub({ log, version }) {
      * Asks the agent to dial a stream for the browser's socket and relays the
      * two. Messages from the browser before the agent's socket are held.
      */
-    openStream(agentId, kind, browser, { query, user, headers, wait = false }) {
+    openStream(agentId, kind, browser, { query, user, headers, wait = false, readOnly = false }) {
       const stream = crypto.randomBytes(16).toString('base64url');
+      const filterInput = readOnly ? createReadOnlyFilter(kind) : (data) => data;
+      if (readOnly) query = readOnlyQuery(kind, query);
       const held = [];
       let heldBytes = 0;
       let done = false;
       const ping = setInterval(() => { if (sendable(browser)) browser.ping(); }, BROWSER_PING_MS);
       browser.on('close', () => clearInterval(ping));
       const onHeld = (data, isBinary) => {
-        held.push([data, isBinary]);
-        heldBytes += data.length;
+        const filtered = filterInput(data, isBinary);
+        if (filtered === null) return;
+        held.push([filtered, isBinary]);
+        heldBytes += filtered.length;
         if (held.length > HOLD_MESSAGES || heldBytes > HOLD_BYTES) fail('too much input before the machine answered', 1013);
       };
       const onEarlyClose = () => { if (!done) { done = true; cleanup(); } };
@@ -230,6 +239,8 @@ export function createAgentHub({ log, version }) {
         pendingStreams.delete(stream);
         browser.off('message', onHeld);
         browser.off('close', onEarlyClose);
+        browser.off('access-changed', onEarlyClose);
+        held.length = 0;
       };
       const fail = (message, code = 1011) => {
         if (done) return;
@@ -241,21 +252,25 @@ export function createAgentHub({ log, version }) {
       const timer = setTimeout(() => fail('the machine did not open the stream within 10 s'), OPEN_TIMEOUT_MS);
       browser.on('message', onHeld);
       browser.on('close', onEarlyClose);
+      browser.on('access-changed', onEarlyClose);
       pendingStreams.set(stream, {
         agentId,
+        active: () => !done && sendable(browser),
         fail,
         attach(agent) {
-          if (done) return agent.close(1000);
+          if (done || !sendable(browser)) return agent.close(1000);
           done = true;
-          cleanup();
           for (const [data, isBinary] of held) agent.send(data, { binary: isBinary });
-          pair(browser, agent);
+          cleanup();
+          pair(browser, agent, filterInput);
         },
       });
       const open = () => {
-        if (done) return;
+        if (done || !sendable(browser)) return;
+        const agent = agents.get(agentId);
+        if (readOnly && agent?.welcomed && agent.hello.capabilities.readOnly !== true) return fail('This machine\'s agent needs an update for Read access.', 4005);
         try {
-          send(agentId, { type: 'open', stream, kind, query, user, ...(headers ? { headers } : {}) });
+          send(agentId, { type: 'open', stream, kind, query, user, ...(readOnly ? { readOnly: true } : {}), ...(headers ? { headers } : {}) });
         } catch (err) {
           fail(err.message);
         }

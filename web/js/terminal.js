@@ -6,6 +6,7 @@ import { settings } from './settings.js';
 import { TERMINAL_THEMES, TERMINAL_FONTS } from './themes.js';
 import { TERM_SEQ, takeMods } from './keys.js';
 import { createScroller } from './gestures.js';
+import { canEdit } from './permissions.js';
 
 const LONG_PRESS_MS = 450;
 const MOVE_SLOP = 10;
@@ -36,15 +37,17 @@ const OPENABLE = /^(https?:|mailto:|tel:|sms:|\/api\/files\/)/i;
  * selection. Paste reads the browser's clipboard and pastes it as one
  * bracketed paste.
  */
-export function createTerminal({ host, setStatus, toast }) {
+export function createTerminal({ host, setStatus, toast, machine, refreshAccess }) {
   const el = document.getElementById('term');
   const view = document.getElementById('view-term');
   // xterm goes in an unpadded box so the fit addon measures the real space.
   const box = document.createElement('div');
   box.className = 'term-box';
   el.append(box);
+  const editable = () => canEdit(machine());
   const xterm = new Terminal({
-    cursorBlink: settings.get('cursorBlink'),
+    cursorBlink: editable() && settings.get('cursorBlink'),
+    disableStdin: !editable(),
     cursorStyle: settings.get('cursorStyle'),
     fontFamily: TERMINAL_FONTS[settings.get('termFont')]?.family ?? TERMINAL_FONTS.system.family,
     fontSize: settings.get('termFontSize'),
@@ -60,13 +63,24 @@ export function createTerminal({ host, setStatus, toast }) {
   let retry = 0;
   let retryTimer = null;
   let webgl = null;
+  let connectAttempt = 0;
 
-  const send = (msg) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
+  const send = (msg) => {
+    if (!editable() && (msg.type === 'input' || msg.type === 'resize')) return;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  };
+
+  function syncPermissions() {
+    xterm.options.disableStdin = !editable();
+    xterm.options.cursorBlink = editable() && settings.get('cursorBlink');
+    if (ws?.readyState === WebSocket.OPEN) setStatus('term', 'ok', editable() ? 'Connected' : 'View only');
+  }
 
   let pasting = false;
 
   // Apply sticky Ctrl / Alt from the key row to the next input.
   function input(data) {
+    if (!editable()) return;
     if (pasting) return send({ type: 'input', data });
     const m = takeMods();
     if (m.ctrl && data.length === 1) {
@@ -108,7 +122,7 @@ export function createTerminal({ host, setStatus, toast }) {
     if (key === 'termTheme') applyTheme();
     else if (key === 'termFont' || key === 'termFontSize') applyFont();
     else if (key === 'cursorStyle') xterm.options.cursorStyle = value;
-    else if (key === 'cursorBlink') xterm.options.cursorBlink = value;
+    else if (key === 'cursorBlink') xterm.options.cursorBlink = editable() && value;
   });
 
   // ---------- clipboard ----------
@@ -133,7 +147,7 @@ export function createTerminal({ host, setStatus, toast }) {
   // later. A clipboard write started now with a promise of the text keeps the
   // gesture's permission until the text arrives.
   function copyAfterSelect() {
-    if (xterm.modes.mouseTrackingMode === 'none') {
+    if (!editable() || xterm.modes.mouseTrackingMode === 'none') {
       const text = xterm.getSelection();
       if (text) copyText(text);
       return;
@@ -175,6 +189,8 @@ export function createTerminal({ host, setStatus, toast }) {
   });
 
   async function paste() {
+    if (!editable()) { toast('This terminal is view only'); return; }
+    const socket = ws;
     // With a mouse, typing goes to the terminal again right away; on touch,
     // focusing it would open the on-screen keyboard.
     if (matchMedia('(pointer: fine)').matches) xterm.focus();
@@ -185,6 +201,7 @@ export function createTerminal({ host, setStatus, toast }) {
       toast('The browser did not allow reading the clipboard');
       return;
     }
+    if (!editable() || ws !== socket) return;
     if (!text) return toast('The clipboard is empty');
     pasting = true;
     try { xterm.paste(text); } finally { pasting = false; }
@@ -208,7 +225,7 @@ export function createTerminal({ host, setStatus, toast }) {
   // While a program has the mouse, right click goes to it (tmux opens its
   // menu) instead of opening the browser's.
   el.addEventListener('contextmenu', (e) => {
-    if (xterm.modes.mouseTrackingMode !== 'none') e.preventDefault();
+    if (editable() && xterm.modes.mouseTrackingMode !== 'none') e.preventDefault();
   });
 
   // ---------- touch ----------
@@ -225,6 +242,7 @@ export function createTerminal({ host, setStatus, toast }) {
       const target = screenEl();
       if (!target || !g) return;
       const sign = settings.get('touchScroll') === 'natural' ? -1 : 1;
+      if (!editable()) { xterm.scrollLines(-steps * sign); return; }
       // Line-based deltas: xterm converts pixel deltas using device pixels, which loses steps on phones.
       for (let i = 0; i < Math.abs(steps); i++) {
         target.dispatchEvent(new WheelEvent('wheel', {
@@ -236,7 +254,7 @@ export function createTerminal({ host, setStatus, toast }) {
 
   function mouseEvent(type, x, y, target = screenEl(), button = 0) {
     target?.dispatchEvent(new MouseEvent(type, {
-      clientX: x, clientY: y, button, buttons: type === 'mouseup' ? 0 : (button === 2 ? 2 : 1), bubbles: true, cancelable: true, view: window,
+      clientX: x, clientY: y, button, buttons: type === 'mouseup' ? 0 : (button === 2 ? 2 : 1), shiftKey: !editable(), bubbles: true, cancelable: true, view: window,
     }));
   }
 
@@ -244,6 +262,7 @@ export function createTerminal({ host, setStatus, toast }) {
   // press until a click picks an item or lands outside it. A release, or a
   // motion report without a button, would close it again at once.
   function rightClick(x, y) {
+    if (!editable()) return;
     mouseEvent('mousedown', x, y, screenEl(), 2);
   }
 
@@ -394,6 +413,8 @@ export function createTerminal({ host, setStatus, toast }) {
   }
 
   function connect() {
+    const attempt = ++connectAttempt;
+    const id = host.id;
     clearTimeout(retryTimer);
     retryTimer = null;
     if (!opened) {
@@ -405,17 +426,20 @@ export function createTerminal({ host, setStatus, toast }) {
       applyFont();
     }
     stopTimers();
+    syncPermissions();
     setStatus('term', 'busy', 'Connecting');
     const socket = new WebSocket(host.ws('/ws/term?flow=1'));
     socket.binaryType = 'arraybuffer';
     ws = socket;
     socket.onopen = () => {
+      if (ws !== socket) return;
       retry = 0;
-      setStatus('term', 'ok', 'Connected');
+      syncPermissions();
       fit();
       pingTimer = setInterval(() => { if (!document.hidden) checkAlive(); }, PING_MS);
     };
     socket.onmessage = (e) => {
+      if (ws !== socket) return;
       clearTimeout(pongTimer);
       pongTimer = null;
       // Text frames are terminal output; binary frames are JSON messages.
@@ -430,6 +454,21 @@ export function createTerminal({ host, setStatus, toast }) {
       if (e.code === 4003) {
         setStatus('term', 'bad', 'No access');
         toast('You no longer have this machine. Ask an admin.');
+        refreshAccess();
+        return;
+      }
+      if (e.code === 4004) {
+        setStatus('term', 'busy', 'Permissions changed');
+        refreshAccess().then((ok) => {
+          if (attempt !== connectAttempt || host.id !== id || ws) return;
+          if (ok) connect();
+          else setStatus('term', 'bad', 'Reconnect to check access');
+        });
+        return;
+      }
+      if (e.code === 4005) {
+        setStatus('term', 'bad', 'Agent update needed');
+        toast('This machine\'s agent needs an update for Read access. Update it, then reconnect.', { ms: 8000 });
         return;
       }
       // The first retry is immediate; later ones back off up to 10 s.
@@ -468,6 +507,7 @@ export function createTerminal({ host, setStatus, toast }) {
     reconnect,
     /** Another machine: clears the old one's output, then connects if a connection was open. */
     switchHost() {
+      connectAttempt++;
       const wasOpen = Boolean(ws || retryTimer);
       if (ws) { const old = ws; ws = null; old.onclose = null; old.close(); }
       clearTimeout(retryTimer);
@@ -479,6 +519,7 @@ export function createTerminal({ host, setStatus, toast }) {
     },
     /** No machine to show: closes the connection and stops retrying. */
     stop() {
+      connectAttempt++;
       if (ws) { const old = ws; ws = null; old.onclose = null; old.close(); }
       clearTimeout(retryTimer);
       retryTimer = null;
@@ -486,7 +527,11 @@ export function createTerminal({ host, setStatus, toast }) {
       setStatus('term', 'idle', 'No machine');
     },
     paste,
-    focus() { xterm.focus(); },
+    focus() { if (editable()) xterm.focus(); },
+    permissionsChanged({ reconnect: reopen = true } = {}) {
+      syncPermissions();
+      if (reopen && (ws || retryTimer)) reconnect();
+    },
     key(name) { input(TERM_SEQ[name] ?? name); },
     fit,
   };

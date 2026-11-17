@@ -765,8 +765,9 @@ body[data-view="machines"] .keyrow { display: none !important; }
 .machine-search { flex: 1 1 200px; min-width: 0; }
 .machine-tools .select { min-width: 0; flex: 0 1 180px; }
 #people-open { margin-left: auto; }
-/* People, Add machine and Remove are for admins; /api/me says who is one. */
+/* People and Remove are admin-only; adding machines has its own permission. */
 body:not(.is-admin) .admin-only { display: none !important; }
+body:not(.can-add-machines) .can-add-only { display: none !important; }
 @media (pointer: coarse) { .input, .machine-tools .select { height: 40px; font-size: 16px; } }
 
 .machine-list { max-width: 1200px; margin: 0 auto; }
@@ -950,6 +951,7 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .empty-actions { display: flex; gap: 8px; margin-top: 12px; }
 body.no-screen .screen-only { display: none; }
 body[data-view="screen"].screen-view-only .keyrow { display: none !important; }
+body[data-view="term"].term-view-only .keyrow { display: none !important; }
 .btn-icon:disabled, .btn-text:disabled, .sheet-item:disabled { opacity: 0.5; cursor: default; }
 .screen-notice {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
@@ -970,19 +972,46 @@ body[data-view="screen"].screen-view-only .keyrow { display: none !important; }
 
 /* ---------- People (admins): who may use which machine ---------- */
 
-.people { width: min(560px, calc(100% - 32px)); }
+.people { width: min(600px, calc(100% - 32px)); }
 .people .dialog-card { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; }
 .people-add { display: flex; gap: 8px; margin-top: 12px; }
 .people-add .input { flex: 1 1 auto; min-width: 0; }
-.people-list { overflow-y: auto; margin-top: 12px; border-top: 1px solid var(--border); }
+.people-list { min-height: 0; overflow-y: auto; margin-top: 12px; border-top: 1px solid var(--border); scrollbar-color: var(--border-strong) var(--surface); }
 .pp-person { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.pp-person:last-child { border-bottom: 0; }
 .pp-head { display: flex; align-items: center; gap: 8px; min-height: 32px; }
 .pp-email { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
 .pp-tag { padding: 2px 8px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font-size: 12px; font-weight: 500; }
 .pp-note { margin: 2px 0 0; color: var(--text-2); font-size: 12px; }
-.pp-machines { display: grid; gap: 2px; margin-top: 4px; }
-.pp-check { display: flex; align-items: center; gap: 10px; min-height: 32px; cursor: pointer; }
-.pp-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
+.pp-machines { min-width: 0; margin: 6px 0 0; padding: 0; border: 0; }
+.pp-row, .pp-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 48px; padding: 6px 0; }
+.pp-row + .pp-row, .pp-add { border-top: 1px dashed var(--border); }
+.pp-machine-name { display: flex; flex-direction: column; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.pp-row-all .pp-machine-name > span:first-child, .pp-add .pp-machine-name > span:first-child { font-weight: 500; }
+.pp-perm { display: inline-flex; flex: none; gap: 2px; padding: 3px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface-2); }
+.pp-check { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: 0 8px; border-radius: var(--r-sm); font-size: 13px; cursor: pointer; }
+.pp-check:hover:not(:has(input:disabled)) { background: var(--surface-3); }
+.pp-check input { appearance: none; display: grid; place-content: center; width: 16px; height: 16px; flex: none; margin: 0; border: 1px solid var(--text-2); border-radius: var(--r-sm); background: var(--surface); cursor: inherit; }
+.pp-check input::before { content: ""; width: 8px; height: 5px; border-left: 2px solid var(--on-primary); border-bottom: 2px solid var(--on-primary); transform: translateY(-1px) rotate(-45deg); visibility: hidden; }
+.pp-check input:checked { background: var(--primary-fill); border-color: var(--primary-ring); }
+.pp-check input:checked::before { visibility: visible; }
+.pp-check:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.pp-check input:focus-visible { outline: none; }
 .pp-check:has(input:disabled) { color: var(--text-2); cursor: default; }
-.pp-check:first-child { font-weight: 500; }
-@media (pointer: coarse) { .pp-check { min-height: 44px; } }
+.pp-check input:disabled { opacity: 0.6; }
+.pp-add { cursor: pointer; }
+.pp-machines:disabled .pp-add { cursor: default; }
+.pp-error { margin-top: 6px; }
+@media (forced-colors: active) {
+  .pp-check input { appearance: auto; }
+  .pp-check input::before { content: none; }
+}
+@media (pointer: coarse) {
+  .pp-check { min-height: 40px; }
+  .pp-head, .pp-add { min-height: 44px; }
+}
+@media (max-width: 380px) {
+  .people .dialog-card { padding: 16px; }
+  .pp-row, .pp-add { gap: 8px; }
+  .pp-check { padding: 0 6px; }
+}

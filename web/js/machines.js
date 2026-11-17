@@ -175,7 +175,7 @@ const meter = (value, label) => el('div', { class: 'meter', role: 'meter', 'aria
 
 // ---------- the view ----------
 
-export function createMachines({ open, toast, currentId, onList, watchSelected = () => false }) {
+export function createMachines({ open, toast, currentId, onList, watchSelected = () => false, canAddMachines = () => false }) {
   const view = $('view-machines');
   const listEl = $('machine-list');
   const detailEl = $('machine-detail');
@@ -251,7 +251,7 @@ export function createMachines({ open, toast, currentId, onList, watchSelected =
     listEl.replaceChildren(...items.map(card));
     $('machine-empty').hidden = items.length > 0;
     $('machine-empty').textContent = machines.length ? 'No machine matches the search.'
-      : loaded ? 'No machines have been given to you yet. Ask an admin of this hub.' : 'Loading.';
+      : loaded ? canAddMachines() ? 'No machines yet. Add a machine to get started.' : 'No machines have been given to you yet. Ask an admin of this hub.' : 'Loading.';
     if (detail) renderDetail();
   }
 
@@ -370,6 +370,7 @@ export function createMachines({ open, toast, currentId, onList, watchSelected =
     if (addToken) $('add-command').textContent = os.command(location.origin, addToken);
   }
   async function addMachine() {
+    if (!canAddMachines()) { toast('An admin must allow you to add machines'); return; }
     addToken = null;
     showAddCommand();
     $('add-command').textContent = 'Making a join token.';

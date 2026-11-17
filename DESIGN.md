@@ -269,6 +269,11 @@ Rounded rectangles with small, consistent corners: 6px inside compact groups (se
 - **Add a machine:** the dialog card at 560px with the install command in a mono, Surface Raised block (selects as one unit), the token's expiry, and Copy and Done.
 - **No screen:** a machine without a screen shows a centred title, one line and Terminal and Machines text buttons in the Screen view; the badge reads No screen in the idle grey.
 
+### People and permissions
+- **People:** the existing dialog card, with explanatory Read/Edit copy, an email-and-Add row and a scrollable list. Each person has an email header and Remove; admins instead have a neutral Admin badge and a note. Every change saves automatically, disables that person's controls while pending, preserves keyboard focus and restores the previous grant on failure.
+- **Machine permissions:** a name on the left and a Read/Edit checkbox pair on the right. The pair uses Surface Raised, a 1px Hairline Strong outline and an 8px radius; labels use 6px corners. Checked boxes use Blue Fill, Blue Ring and a white check in both themes. The levels are exclusive, since Edit includes Read; neither means no access. Machine rows have 1px dashed hairline dividers. The Every machine row includes future machines, with inherited permissions disabled where they cannot be changed individually.
+- **Adding machines:** a separate May add machines switch follows the machine rows, with a note explaining the automatic Edit grant. Its whole label row is clickable. Read/Edit labels grow to 40px high and the add-permission row stays at least 44px on coarse pointers. Long names and emails wrap rather than pushing the controls out of the dialog.
+
 ### Motion
 Short and functional: 0.15s colour transitions on controls, 0.2 to 0.3s ease-out (`cubic-bezier(0.22, 1, 0.36, 1)`) for the toolbar, sheets, settings and toast, a 1.4s pulse on the busy dot, and a 0.18s touch-ring entrance. Reduced motion collapses all durations to near zero.
 

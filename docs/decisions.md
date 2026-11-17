@@ -4,6 +4,13 @@ Choices made while building deskport, newest first, with the reason for each. En
 
 ## 2026-11-16
 
+### Read/Edit grants and allowing people to add their own machines
+The owner chose Read as viewing dashboards, screen pictures and terminal output, and Edit as control (including Read). Existing `machines` grants stay Edit; `readMachines` and `addMachines` are new, independent fields in `access.json`. The People dialog uses the reference's checkbox pairs, translated to the dashboard's neutral surfaces, hairlines and blue checked state, plus a separate May add machines switch. Edit and Read are exclusive selections; neither removes access. Every machine includes future machines, with per-machine Edit upgrades allowed over an all-Read grant.
+
+Join tokens keep their issuer and recheck permission when used. A non-admin receives Edit on the machine their token joins; an ownership field in the agent's body is never trusted. Read is enforced by the API, the hub's held/live input filters and the local/Rust stream handlers. It must not create a desktop or terminal, resize one, change share mode or send clipboard input. The portal uses ScreenCast-only consent for Read, separate from its control token. Edit never overrides the portal's own restrictions. Agent 0.4.0 advertises `readOnly: true`; older agents are refused for Read streams until updated, so their old startup behavior cannot change a machine.
+
+Live access removal closes with 4003; a level change closes with 4004. Revocation cancels pending relays and closes paired agents before the browser's close handshake, then the page refreshes access before reconnecting. A downgraded screen can briefly find its old session busy and uses a bounded retry; portal refusals are still not retried. Browser regression tests use real access/API/UI code with fake machines and streams, so checking input, resize, revocation, both themes and phone layouts cannot disturb the owner's desktop or tmux session.
+
 ### Windows agent without a screen (roadmap phase 7, first part)
 The agent builds for x86_64 Windows with metrics, a ConPTY terminal, joining, updates, a runner at logon and uninstall; `scripts/install-agent.ps1` (served as `/agent/v1/install.ps1`) installs it, and Add machine has a Windows choice. Nothing has run on Windows: there is no Windows machine or Wine here. What was checked on Linux is listed in windows.md, "What has been checked". The screen is designed there and not built.
 

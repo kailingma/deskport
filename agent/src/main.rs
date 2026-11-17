@@ -169,7 +169,7 @@ async fn control(cfg: &config::Config, seed: &[u8; 32], connected: &mut Option<I
                             let _ = out_tx.send(json!({ "type": "stream-failed", "stream": stream, "message": format!("this machine has no {kind}") }).to_string());
                             continue;
                         }
-                        let query = v["query"].as_str().unwrap_or("").to_string();
+                        let query = protocol::stream_query(v["query"].as_str().unwrap_or(""), v["readOnly"] == true);
                         let (cfg, seed, out_tx) = (cfg.clone(), *seed, out_tx.clone());
                         tokio::spawn(async move {
                             match dial(&cfg, &seed, &format!("{PREFIX}stream/{stream}")).await {

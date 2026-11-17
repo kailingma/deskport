@@ -1,4 +1,5 @@
 // Screen choices come from the selected machine, not the hub's desktop.
+import { canEdit } from './permissions.js';
 export const SCREEN_SOURCES = { mirror: 'My monitor', virtual: 'Extra monitor', session: 'Separate desktop' };
 export const SCREEN_ENCODINGS = { images: 'Images', av1: 'AV1 video', h264: 'H.264 video' };
 
@@ -11,7 +12,7 @@ export function screenChoices(machine) {
     return known.length ? known : fallback;
   };
   return {
-    sources: offered('screenSources', SCREEN_SOURCES, machine.local ? Object.keys(SCREEN_SOURCES) : ['mirror']),
+    sources: offered('screenSources', SCREEN_SOURCES, machine.local ? Object.keys(SCREEN_SOURCES) : ['mirror']).filter((source) => canEdit(machine) || source === 'mirror'),
     encodings: offered('screenEncodings', SCREEN_ENCODINGS, machine.local ? Object.keys(SCREEN_ENCODINGS) : ['images']),
   };
 }
@@ -24,9 +25,9 @@ export function pictureOptions(machine, get) {
   return {
     source,
     encoding,
-    matchMonitor: Boolean(machine.local && source === 'mirror' && get('matchMonitor')),
-    monitor: machine.local ? get('monitor') : 'primary',
-    direct: Boolean(machine.local && source === 'session' && encoding !== 'images' && get('direct')),
+    matchMonitor: Boolean(canEdit(machine) && machine.local && source === 'mirror' && get('matchMonitor')),
+    monitor: canEdit(machine) && machine.local ? get('monitor') : 'primary',
+    direct: Boolean(canEdit(machine) && machine.local && source === 'session' && encoding !== 'images' && get('direct')),
   };
 }
 

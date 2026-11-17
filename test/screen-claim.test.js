@@ -41,6 +41,19 @@ test('viewers of different sources do not affect each other', async () => {
   assert.equal(mirror.closed, null);
 });
 
+test('a Read viewer never replaces an existing viewer', async () => {
+  const claims = new Map();
+  const first = fakeSocket();
+  const read = fakeSocket();
+  await claimScreen(claims, 'mirror', first, { wait: 0 });
+  await assert.rejects(claimScreen(claims, 'mirror', read, { readOnly: true, wait: 0 }), /already being viewed/);
+  assert.equal(first.closed, null);
+  assert.equal(claims.get('mirror').ws, first);
+  first.close(1000);
+  await claimScreen(claims, 'mirror', read, { readOnly: true, wait: 0 });
+  assert.equal(claims.get('mirror').ws, read);
+});
+
 test('the new viewer waits for the old RDP session to be released', async () => {
   const claims = new Map();
   const first = fakeSocket();

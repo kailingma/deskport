@@ -47,10 +47,12 @@ static SESSION: Mutex<Option<Arc<Session>>> = Mutex::new(None);
 pub struct Conn {
     session: Arc<Session>,
     id: u64,
+    read_only: bool,
 }
 
 impl Conn {
     pub fn resize(&self, cols: u16, rows: u16) {
+        if self.read_only { return; }
         if let Some(h) = *self.session.hpc.lock().unwrap() {
             unsafe { ResizePseudoConsole(h, COORD { X: cols as i16, Y: rows as i16 }) };
         }
@@ -79,11 +81,12 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-pub fn attach(cwd: &str) -> std::io::Result<Attached> {
+pub fn attach(cwd: &str, read_only: bool) -> std::io::Result<Attached> {
     let mut current = SESSION.lock().unwrap();
     for _ in 0..2 {
         let session = match current.as_ref() {
             Some(s) if !s.out.is_closed() => s.clone(),
+            _ if read_only => return Err(std::io::Error::other("the terminal is not running; someone with Edit access must open it first")),
             _ => {
                 let s = spawn(cwd)?;
                 *current = Some(s.clone());
@@ -93,7 +96,7 @@ pub fn attach(cwd: &str) -> std::io::Result<Attached> {
         if let Some((id, output, replay)) = session.out.subscribe() {
             let label = session.label.clone();
             let input = session.input.clone();
-            return Ok(Attached { output, input, replay, label, conn: Conn { session, id } });
+            return Ok(Attached { output, input, replay, label, conn: Conn { session, id, read_only } });
         }
         *current = None;
     }

@@ -141,7 +141,7 @@ fn token_path() -> std::path::PathBuf {
 /// The capabilities object for `hello` and `capabilities` (docs/protocol.md).
 pub fn capabilities(terminal: bool) -> Value {
     let (screen, note) = current();
-    let mut caps = json!({ "screen": screen, "terminal": terminal, "files": false, "metrics": true });
+    let mut caps = json!({ "screen": screen, "terminal": terminal, "files": false, "metrics": true, "readOnly": true });
     if let Some(note) = note {
         caps["notes"] = json!({ "screen": note });
     }

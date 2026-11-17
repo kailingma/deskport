@@ -22,10 +22,12 @@ pub fn available() -> bool {
 pub struct Conn {
     master: File,
     child: Child,
+    read_only: bool,
 }
 
 impl Conn {
     pub fn resize(&self, cols: u16, rows: u16) {
+        if self.read_only { return; }
         let ws = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
         unsafe { libc::ioctl(self.master.as_raw_fd(), libc::TIOCSWINSZ, &ws) };
     }
@@ -41,7 +43,15 @@ impl Conn {
     }
 }
 
-fn spawn_tmux(session: &str, cwd: &str) -> std::io::Result<Conn> {
+fn tmux_args(session: &str, cwd: &str, read_only: bool) -> Vec<String> {
+    if read_only {
+        vec!["attach-session".into(), "-E".into(), "-t".into(), format!("={session}"), "-f".into(), "read-only,ignore-size".into()]
+    } else {
+        ["new-session", "-A", "-s", session, "-c", cwd].map(String::from).to_vec()
+    }
+}
+
+fn spawn_tmux(session: &str, cwd: &str, read_only: bool) -> std::io::Result<Conn> {
     let mut master: libc::c_int = -1;
     let mut slave: libc::c_int = -1;
     let ws = libc::winsize { ws_row: 30, ws_col: 100, ws_xpixel: 0, ws_ypixel: 0 };
@@ -52,7 +62,7 @@ fn spawn_tmux(session: &str, cwd: &str) -> std::io::Result<Conn> {
     let slave = unsafe { OwnedFd::from_raw_fd(slave) };
     unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
     let mut cmd = Command::new("tmux");
-    cmd.args(["new-session", "-A", "-s", session, "-c", cwd]).current_dir(cwd);
+    cmd.args(tmux_args(session, cwd, read_only)).current_dir(cwd);
     cmd.env_clear();
     for (k, v) in std::env::vars_os() {
         if !crate::sys::is_secret(&k.to_string_lossy()) {
@@ -73,12 +83,12 @@ fn spawn_tmux(session: &str, cwd: &str) -> std::io::Result<Conn> {
         });
     }
     let child = cmd.spawn()?;
-    Ok(Conn { master: File::from(master), child })
+    Ok(Conn { master: File::from(master), child, read_only })
 }
 
-pub fn attach(cwd: &str) -> std::io::Result<Attached> {
+pub fn attach(cwd: &str, read_only: bool) -> std::io::Result<Attached> {
     let session = tmux_session();
-    let conn = spawn_tmux(&session, cwd)?;
+    let conn = spawn_tmux(&session, cwd, read_only)?;
     // The pseudo-terminal is read on its own thread. The channel holds a few
     // chunks; while flow control pauses, nothing is taken from it, the thread
     // blocks, and tmux sees a slow client.
@@ -108,4 +118,13 @@ pub fn attach(cwd: &str) -> std::io::Result<Attached> {
     });
     let label = format!("tmux session \"{session}\" (pid {})", conn.child.id());
     Ok(Attached { output, input, replay: Vec::new(), label, conn })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn read_only_attaches_without_starting_or_resizing_a_session() {
+        assert_eq!(super::tmux_args("test", "/", true), ["attach-session", "-E", "-t", "=test", "-f", "read-only,ignore-size"]);
+        assert_eq!(super::tmux_args("test", "/", false)[0], "new-session");
+    }
 }

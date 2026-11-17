@@ -4,6 +4,7 @@ import { KS, keysymFor, takeMods } from './keys.js';
 import { createScroller, touchMid, touchDist } from './gestures.js';
 import { createVideo, videoSupport } from './video.js';
 import { pictureOptions, portalPermissions } from './screen-options.js';
+import { canEdit, screenPermissionsFor } from './permissions.js';
 
 const $ = (id) => document.getElementById(id);
 const LONG_PRESS_MS = 450;
@@ -29,7 +30,7 @@ const MAX_DROPS = 5;
 const NATIVE_SLACK = 16;
 const STABLE_MS = 10000;
 
-export function createScreen({ host, setStatus, toast, machine, onPermissions = () => {} }) {
+export function createScreen({ host, setStatus, toast, machine, refreshAccess, onPermissions = () => {} }) {
   const wrap = $('display-wrap');
   const ime = $('screen-ime');
   const ring = $('touch-ring');
@@ -53,12 +54,15 @@ export function createScreen({ host, setStatus, toast, machine, onPermissions = 
   let imagesInstead = false;
   let warnedUnsupported = '';
   let notice = '';
-  let permissions = { control: true, clipboard: true };
+  let sessionPermissions = { control: true, clipboard: true };
+  let permissions = screenPermissionsFor(machine(), sessionPermissions);
   let connectAttempt = 0;
+  let permissionReconnect = false;
 
   function setPermissions(next) {
-    permissions = next;
-    onPermissions(next);
+    sessionPermissions = next;
+    permissions = screenPermissionsFor(machine(), next);
+    onPermissions(permissions);
   }
 
   function connectedStatus() {
@@ -323,6 +327,7 @@ export function createScreen({ host, setStatus, toast, machine, onPermissions = 
   // A lost connection is retried at once, then after 1, 2, 4 and 8 s; while the
   // page is in the background it waits until it is shown again.
   function reconnectSoon() {
+    clearTimeout(dropTimer);
     setStatus('screen', 'busy', 'Reconnecting');
     if (document.hidden) { waitingForWake = true; return; }
     const delay = drops ? 1000 * 2 ** (drops - 1) : 0;
@@ -366,12 +371,48 @@ export function createScreen({ host, setStatus, toast, machine, onPermissions = 
     // The tunnel reports a lost or failed connection here; the server's own
     // errors (nobody signed in, guacd down) arrive as error instructions instead.
     let lostLink = false;
-    tunnel.onerror = () => { lostLink = true; };
+    let accessClose = null;
+    let retryForBusy = false;
+    tunnel.onerror = (status) => {
+      accessClose = status.message === 'access removed' ? 'removed'
+        : status.message === 'permissions changed' ? 'changed'
+          : status.message?.includes('needs an update for Read access') ? 'unsupported' : null;
+      lostLink = !accessClose;
+    };
     const c = new Guacamole.Client(tunnel);
     // Guacamole.Client does not watch the tunnel, so a socket that dies or closes
     // would leave the last picture up, marked connected.
     tunnel.onstatechange = (state) => {
       if (state !== Guacamole.Tunnel.State.CLOSED || client !== c || !wantConnected) return;
+      if (retryForBusy) return;
+      if (accessClose) {
+        setPermissions({ control: false, clipboard: false });
+        if (accessClose === 'unsupported') {
+          permissionReconnect = false;
+          wantConnected = false;
+          setStatus('screen', 'bad', 'Agent update needed');
+          overlay('Agent update needed', 'This machine\'s agent needs an update for Read access. Update it, then reconnect.');
+        } else if (accessClose === 'removed') {
+          permissionReconnect = false;
+          wantConnected = false;
+          setStatus('screen', 'bad', 'No access');
+          overlay('No access', 'You no longer have this machine. Ask an admin.');
+          refreshAccess();
+        } else {
+          permissionReconnect = true;
+          setStatus('screen', 'busy', 'Permissions changed');
+          refreshAccess().then((ok) => {
+            if (client !== c || !wantConnected || attempt !== connectAttempt) return;
+            if (ok) connect();
+            else {
+              wantConnected = false;
+              setStatus('screen', 'bad', 'Disconnected');
+              overlay('Could not refresh access', 'Reconnect to check your machine permissions again.');
+            }
+          });
+        }
+        return;
+      }
       if (lostLink && drops < MAX_DROPS) return reconnectSoon();
       wantConnected = false;
       setStatus('screen', 'bad', 'Disconnected');
@@ -392,6 +433,7 @@ export function createScreen({ host, setStatus, toast, machine, onPermissions = 
       switch (state) {
         case 1: case 2: setStatus('screen', 'busy', 'Connecting'); break;
         case 3:
+          permissionReconnect = false;
           connectedStatus();
           if (encoding !== 'images' && !video) startVideo(c, tunnel);
           setTimeout(() => { if (client === c) drops = 0; }, STABLE_MS);
@@ -406,15 +448,22 @@ export function createScreen({ host, setStatus, toast, machine, onPermissions = 
             }
           }, 12000);
           break;
-        case 4: setStatus('screen', 'busy', 'Closing'); break;
+        case 4: if (!retryForBusy) setStatus('screen', 'busy', 'Closing'); break;
         case 5:
-          if (!wantConnected) break; // onerror already reported why
+          if (!wantConnected || retryForBusy) break; // onerror already reported why
           setStatus('screen', 'bad', 'Disconnected');
           overlay('Disconnected', 'The remote desktop session ended.');
           break;
       }
     };
     c.onerror = (st) => {
+      // A downgraded portal/RDP stream may arrive just before the old agent
+      // finished closing. Retry that busy state, never a refused portal share.
+      if (permissionReconnect && st.message?.includes('already being viewed') && drops < MAX_DROPS) {
+        retryForBusy = true;
+        reconnectSoon();
+        return;
+      }
       setStatus('screen', 'bad', 'Error');
       overlay('Could not connect', st.message || `Guacamole status ${st.code}`);
       wantConnected = false;
@@ -433,7 +482,7 @@ export function createScreen({ host, setStatus, toast, machine, onPermissions = 
     display.onresize = rescale;
 
     c.onclipboard = (stream, mimetype) => {
-      if (client !== c || !/^text\//.test(mimetype)) return;
+      if (client !== c || !permissions.clipboard || !/^text\//.test(mimetype)) return;
       const reader = new Guacamole.StringReader(stream);
       let text = '';
       reader.ontext = (t) => { text += t; };
@@ -584,12 +633,12 @@ export function createScreen({ host, setStatus, toast, machine, onPermissions = 
     kbWasOpen = kbOpen;
     if (settings.get('kbResize') === 'keep' && (kbOpen || kbChanged)) return;
     rescale();
-    if (!client || pictureOptions(machine(), settings.get).source === 'mirror') return;
+    if (!client || !canEdit(machine()) || pictureOptions(machine(), settings.get).source === 'mirror') return;
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const ratio = window.devicePixelRatio || 1;
       const size = [Math.round(wrap.clientWidth * ratio), Math.round(wrap.clientHeight * ratio)];
-      if (!client || size.join('x') === sentSize) return;
+      if (!client || !canEdit(machine()) || size.join('x') === sentSize) return;
       sentSize = size.join('x');
       client.sendSize(...size);
     }, 600);
@@ -600,13 +649,14 @@ export function createScreen({ host, setStatus, toast, machine, onPermissions = 
     ensureConnected() { if (!client || stale) connect(); },
     markStale() { stale = true; imagesInstead = false; },
     /** Closes the connection to a machine no longer shown; the next visit reconnects. */
-    close() { disconnect(); stale = true; imagesInstead = false; setStatus('screen', 'idle', 'Idle'); },
+    close() { permissionReconnect = false; disconnect(); stale = true; imagesInstead = false; setStatus('screen', 'idle', 'Idle'); },
     /** Closes the connection, for a machine that has no screen. */
-    stop() { disconnect(); stale = true; setStatus('screen', 'idle', 'No screen'); },
-    reconnect() { drops = 0; imagesInstead = false; connect(); },
+    stop() { permissionReconnect = false; disconnect(); stale = true; setStatus('screen', 'idle', 'No screen'); },
+    reconnect({ permissionsChanged = false } = {}) { drops = 0; imagesInstead = false; permissionReconnect = permissionsChanged; connect(); },
     focus() { wrap.focus({ preventScroll: true }); },
     releaseKeys() { keyboard?.reset(); },
-    showKeyboard() { ime.focus({ preventScroll: true }); },
+    showKeyboard() { if (permissions.control) ime.focus({ preventScroll: true }); },
+    syncPermissions() { setPermissions(sessionPermissions); },
     key(name) { press(KS[name] ?? keysymFor(name)); },
     superKey() { chord(KS.superL); },
     ctrlAltDel() { chord(KS.ctrl, KS.alt, KS.del); },

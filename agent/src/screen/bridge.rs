@@ -69,6 +69,7 @@ struct Query {
     encoding: String,
     speed: u32,
     bitrate: String,
+    read_only: bool,
 }
 
 fn parse_query(query: &str) -> Query {
@@ -89,6 +90,7 @@ fn parse_query(query: &str) -> Query {
         encoding: pick("encoding", &["images", "av1", "h264"], "images"),
         speed: int("speed", 0, 0, 2),
         bitrate: pick("bitrate", &["auto", "500", "1000", "2000", "5000", "10000", "20000"], "auto"),
+        read_only: crate::protocol::read_only(query),
     }
 }
 
@@ -241,8 +243,15 @@ pub async fn serve_screen(ws: Ws, query: &str) {
     // One viewer at a time.
     let me = NEXT_VIEWER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let (bye_tx, mut bye_rx) = oneshot::channel();
-    if let Some((_, old)) = VIEWER.lock().unwrap().replace((me, bye_tx)) {
-        let _ = old.send(());
+    {
+        let mut viewer = VIEWER.lock().unwrap();
+        if q.read_only && viewer.as_ref().is_some_and(|(_, old)| !old.is_closed()) {
+            fail("This screen is already being viewed. Try again after the other viewer disconnects.");
+            return;
+        }
+        if let Some((_, old)) = viewer.replace((me, bye_tx)) {
+            let _ = old.send(());
+        }
     }
 
     let video_mode = q.encoding != "images";
@@ -258,6 +267,7 @@ pub async fn serve_screen(ws: Ws, query: &str) {
     let cfg = json!({
         "codec": codec, "width": q.width, "height": q.height, "res": q.res, "quality": q.quality,
         "speed": q.speed, "kbps": sent_kbps, "fps": fps, "tokenFile": super::token_path(),
+        "readOnly": q.read_only,
     });
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
     let helper = match Helper::spawn(&cfg, ev_tx) {
@@ -356,7 +366,7 @@ pub async fn serve_screen(ws: Ws, query: &str) {
                                 helper.send(json!({ "open": true }));
                             }
                         }
-                        "clipboard" => {
+                        "clipboard" if clipboard => {
                             clips.insert(arg(1).to_string(), Vec::new());
                             out(encode(&["ack", arg(1), "OK", "0"]));
                         }
@@ -409,11 +419,11 @@ pub async fn serve_screen(ws: Ws, query: &str) {
                                 ask_at = None;
                                 let (w, h) = (m["width"].as_u64().unwrap_or(2) as u32, m["height"].as_u64().unwrap_or(2) as u32);
                                 started = Some((w, h));
-                                control = m["control"] == true;
+                                control = !q.read_only && m["control"] == true;
                                 clipboard = control && m["clipboard"] == true;
                                 eprintln!("screen: started, {}x{} with {}{}", w, h, m["encoder"].as_str().unwrap_or("?"), if control { "" } else { ", view only" });
                                 out(encode(&["size", "0", &w.to_string(), &h.to_string()]) + &encode(&["sync", &ts().to_string()]));
-                                out(encode(&["name", &start_notice(control, clipboard, &machine)]));
+                                out(encode(&["name", &start_notice(q.read_only, control, clipboard, &machine)]));
                                 if !images && video_tx.is_some() {
                                     send_video(&video_tx, json!({ "type": "config", "codec": codec_string(codec, w, h), "width": w, "height": h }));
                                     helper.send(json!({ "key": true }));
@@ -583,8 +593,10 @@ fn video_failure(images: bool, code: Option<i32>) -> bool {
 }
 
 /// The `name` notice once sharing starts; empty clears the waiting notice.
-fn start_notice(control: bool, clipboard: bool, machine: &str) -> String {
-    if !control {
+fn start_notice(read_only: bool, control: bool, clipboard: bool, machine: &str) -> String {
+    if read_only {
+        "View only: you have Read access to this machine.".into()
+    } else if !control {
         format!("View only: control was not allowed at {machine}.")
     } else if !clipboard {
         format!("Clipboard unavailable: clipboard sharing was not allowed at {machine}.")
@@ -634,6 +646,8 @@ mod tests {
         assert_eq!(q.encoding, "h264");
         assert_eq!(q.speed, 2);
         assert_eq!(q.bitrate, "auto");
+        assert!(!q.read_only);
+        assert!(parse_query("?readonly=1&readonly=0").read_only);
     }
 
     #[test]
@@ -654,9 +668,10 @@ mod tests {
 
     #[test]
     fn start_notices_match_the_page() {
-        assert_eq!(start_notice(true, true, "kde"), "");
-        assert!(start_notice(false, true, "kde").starts_with("View only:"));
-        assert!(start_notice(true, false, "kde").starts_with("Clipboard unavailable:"));
+        assert_eq!(start_notice(false, true, true, "kde"), "");
+        assert!(start_notice(false, false, true, "kde").starts_with("View only:"));
+        assert!(start_notice(false, true, false, "kde").starts_with("Clipboard unavailable:"));
+        assert!(start_notice(true, true, true, "kde").contains("Read access"));
     }
 
     #[test]

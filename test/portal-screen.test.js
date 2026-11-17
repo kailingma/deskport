@@ -34,9 +34,9 @@ test('portal notices: waiting, view only, clipboard unavailable and full control
 test('joined machines never get the hub-only direct path or monitor choice', () => {
   const saved = { source: 'session', encoding: 'h264', direct: true, matchMonitor: true, monitor: 'HDMI-1' };
   const get = (k) => saved[k];
-  const joined = { local: false, screen: true, screenSources: ['mirror'], screenEncodings: ['images', 'h264'] };
+  const joined = { local: false, screen: true, access: 'edit', screenSources: ['mirror'], screenEncodings: ['images', 'h264'] };
   assert.deepEqual(pictureOptions(joined, get), { source: 'mirror', encoding: 'h264', matchMonitor: false, monitor: 'primary', direct: false });
-  const hub = { local: true, screen: true };
+  const hub = { local: true, screen: true, access: 'edit' };
   assert.equal(pictureOptions(hub, get).direct, true);
   assert.equal(pictureOptions(hub, (k) => (k === 'encoding' ? 'images' : saved[k])).direct, false);
 });
@@ -66,4 +66,36 @@ test('the helper checks every pipeline element and needs an explicit clipboard g
   }
   assert.match(src, /started\.get\("clipboard_enabled"\) is True/);
   assert.doesNotMatch(src, /clipboard_enabled", True/);
+});
+
+test('portal Read startup asks only for ScreenCast, preserving the separate control token', () => {
+  const trace = py(`
+calls, reads, writes = [], [], []
+class GLib:
+    class Error(Exception): pass
+    Variant = staticmethod(lambda signature, value: value)
+class Gio:
+    class DBusSignalFlags: NONE = 0
+class Bus:
+    def signal_subscribe(self, *args): pass
+class Portal:
+    def request(self, interface, method, args, **kwargs):
+        calls.append([interface, method, args({})])
+        return {"session_handle": "/session"} if method == "CreateSession" else {"restore_token": "new", "clipboard_enabled": True, "devices": 3}
+    def call(self, interface, method, args): calls.append([interface, method, args])
+m.read_token = lambda file: reads.append(file) or "saved"
+m.write_token = lambda file, token: writes.append([file, token])
+m.message = lambda **kwargs: None
+_, _, clipboard = m.start_share(Portal(), Gio, GLib, Bus(), {"readOnly": True, "tokenFile": "/token"}, 2, 1)
+print(json.dumps({"calls": calls, "reads": reads, "writes": writes, "clipboard": clipboard}))
+`);
+  assert.deepEqual(trace.calls.map(([iface, method]) => [iface, method]), [
+    ['org.freedesktop.portal.ScreenCast', 'CreateSession'],
+    ['org.freedesktop.portal.ScreenCast', 'SelectSources'],
+    ['org.freedesktop.portal.ScreenCast', 'Start'],
+  ]);
+  assert.equal(trace.clipboard, false);
+  assert.deepEqual(trace.reads, ['/token.readonly']);
+  assert.deepEqual(trace.writes, [['/token.readonly', 'new']]);
+  assert.equal(trace.calls[1][2][1].types, 1, 'only a real monitor, never a virtual monitor');
 });

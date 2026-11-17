@@ -11,7 +11,7 @@ import { createVideoHub } from './video.js';
  * separate desktop, the monitors and xdg-open. Used in the hub's own process
  * (DESKPORT_RELAY=0) or by the agent shim (shim/agent.js).
  *
- * streams[kind](ws, url) serves one browser stream; url is the browser's path
+ * streams[kind](ws, url, { readOnly }) serves one browser stream; url is the browser's path
  * and query. requests[`${method} ${path}`]() answers the host's API with
  * { status, body }.
  */
@@ -36,9 +36,9 @@ export function createLocalHost({ config, root, log }) {
   const screenConfig = { ...config, session, monitors, video, mainBus };
 
   const streams = {
-    screen: (ws, url) => handleScreen(ws, { url }, screenConfig, log),
+    screen: (ws, url, options = {}) => handleScreen(ws, { url }, { ...screenConfig, ...options }, log),
     video: (ws, url) => video.open(ws, { url }),
-    term: (ws, url) => handleTerminal(ws, { url }, terminal, log),
+    term: (ws, url, options = {}) => handleTerminal(ws, { url }, { ...terminal, ...options }, log),
   };
 
   const requests = {

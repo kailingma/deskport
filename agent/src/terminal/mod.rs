@@ -37,6 +37,10 @@ fn flow_high() -> usize {
     std::env::var("DESKPORT_TERM_WINDOW").ok().and_then(|v| v.parse().ok()).unwrap_or(128 * 1024)
 }
 
+fn permits_input(read_only: bool, kind: Option<&str>) -> bool {
+    !read_only || matches!(kind, Some("ack" | "ping"))
+}
+
 /// Why a connection's output ended.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub enum End {
@@ -116,8 +120,9 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let flow = query.trim_start_matches('?').split('&').any(|kv| kv == "flow=1");
+    let read_only = crate::protocol::read_only(query);
     let (mut tx, mut rx) = ws.split();
-    let Attached { output: mut out_rx, input: in_tx, replay, label, conn } = match pty::attach(&cwd()) {
+    let Attached { output: mut out_rx, input: in_tx, replay, label, conn } = match pty::attach(&cwd(), read_only) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("terminal: did not start: {e}");
@@ -171,6 +176,7 @@ where
                     _ => continue,
                 };
                 let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
+                if !permits_input(read_only, v["type"].as_str()) { continue; }
                 match v["type"].as_str() {
                     Some("input") => if let Some(d) = v["data"].as_str() { let _ = in_tx.send(d.as_bytes().to_vec()); },
                     Some("resize") => {
@@ -206,7 +212,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, env_block};
+    use super::{decode, env_block, permits_input};
+
+    #[test]
+    fn read_only_accepts_flow_control_not_terminal_control() {
+        for kind in [Some("input"), Some("resize"), Some("future-command"), None] {
+            assert!(!permits_input(true, kind));
+            assert!(permits_input(false, kind));
+        }
+        assert!(permits_input(true, Some("ack")));
+        assert!(permits_input(true, Some("ping")));
+    }
 
     #[test]
     fn environment_block() {

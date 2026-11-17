@@ -9,6 +9,8 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { createAgentHub, AgentUnavailable } from '../hub/agents.js';
 import { SUBPROTOCOL, generateAgentKey, signUpgrade, createUpgradeVerifier, publicKeyFrom, relayCloseCode } from '../hub/protocol.js';
 import { parseRange, serveFileStream } from '../shim/files.js';
+import { encode, GuacParser } from '../shim/guac-protocol.js';
+import { EventEmitter } from 'node:events';
 
 const quiet = () => {};
 const once = (emitter, event) => new Promise((r) => emitter.once(event, (...a) => r(a)));
@@ -50,7 +52,7 @@ test('byte ranges', () => {
 });
 
 /** A hub with one browser endpoint (/ws/term) relayed to agent "pc", and a file route. */
-async function startHub({ wait = false } = {}) {
+async function startHub({ wait = false, readOnly = false, kind = 'term' } = {}) {
   const agents = createAgentHub({ log: quiet, version: 'test' });
   const browserWss = new WebSocketServer({ noServer: true });
   const app = express();
@@ -59,7 +61,7 @@ async function startHub({ wait = false } = {}) {
   server.on('upgrade', (req, socket, head) => {
     const { pathname, search } = new URL(req.url, 'http://x');
     if (agents.handles(pathname)) return agents.upgrade(req, socket, head);
-    browserWss.handleUpgrade(req, socket, head, (ws) => agents.openStream('pc', 'term', ws, { query: search, user: { email: 't@test' }, wait }));
+    browserWss.handleUpgrade(req, socket, head, (ws) => agents.openStream('pc', kind, ws, { query: search, user: { email: 't@test' }, wait, readOnly }));
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `ws://127.0.0.1:${server.address().port}`;
@@ -72,7 +74,7 @@ async function startHub({ wait = false } = {}) {
 }
 
 /** A minimal agent: connects, says hello, and hands each open to onOpen(msg, dialStream). */
-async function startAgent(hub, key, { onOpen, onRequest = async () => ({ status: 200, body: null }), capabilities = { terminal: true } } = {}) {
+async function startAgent(hub, key, { onOpen, onRequest = async () => ({ status: 200, body: null }), capabilities = { terminal: true, readOnly: true } } = {}) {
   const dial = (p) => new WebSocket(`${hub.base}${p}`, SUBPROTOCOL, { headers: signUpgrade({ id: 'pc', privateKeyPem: key.privateKeyPem, pathAndQuery: p }) });
   const control = dial('/agent/v1/control');
   await once(control, 'open');
@@ -114,7 +116,7 @@ test('capabilities: malformed updates and non-object control messages are ignore
   hub.agents.register('pc', key.publicKey);
   const capabilities = { screen: { sources: ['mirror'], encodings: ['images'], backend: 'portal' }, terminal: true };
   const agent = await startAgent(hub, key, { capabilities });
-  for (const bad of [undefined, null, [], 'screen', { screen: true }, { screen: [] }, { screen: { sources: 'mirror' } }, { screen: { encodings: [null] } }, { screen: { backend: {} } }, { terminal: 'yes' }, { notes: [] }, { notes: { screen: {} } }]) {
+  for (const bad of [undefined, null, [], 'screen', { screen: true }, { screen: [] }, { screen: { sources: 'mirror' } }, { screen: { encodings: [null] } }, { screen: { backend: {} } }, { terminal: 'yes' }, { readOnly: 'true' }, { notes: [] }, { notes: { screen: {} } }]) {
     agent.control.send(JSON.stringify({ type: 'capabilities', capabilities: bad }));
   }
   for (const raw of ['null', '[]', '"hello"', '{']) agent.control.send(raw);
@@ -254,4 +256,154 @@ test('relay: a stream for an expected agent waits for it to connect', async () =
   browser.close();
   agent.control.close();
   hub.close();
+});
+
+test('Read relay: terminal input and resize are dropped before pairing and afterwards', async (t) => {
+  const hub = await startHub({ readOnly: true });
+  t.after(() => hub.close());
+  const key = generateAgentKey();
+  hub.agents.register('pc', key.publicKey);
+  const got = [];
+  let opened;
+  await startAgent(hub, key, {
+    onOpen(msg, dialStream) {
+      opened = msg;
+      setTimeout(() => {
+        const ws = dialStream();
+        ws.on('message', (data, binary) => {
+          got.push([JSON.parse(data), binary]);
+          ws.send('output');
+        });
+      }, 50);
+    },
+  });
+  const browser = new WebSocket(`${hub.base}/ws/term?flow=1&readonly=0`);
+  await once(browser, 'open');
+  const early = once(browser, 'message');
+  browser.send(JSON.stringify({ type: 'input', data: 'early command' }));
+  browser.send(JSON.stringify({ type: 'resize', cols: 2, rows: 2 }));
+  browser.send(Buffer.from(JSON.stringify({ type: 'input', data: 'binary command' })));
+  browser.send(JSON.stringify({ type: 'ack', chars: 1 }));
+  assert.equal((await early)[0].toString(), 'output');
+  assert.equal(opened.readOnly, true);
+  assert.equal(new URLSearchParams(opened.query).get('readonly'), '1');
+  assert.equal(new URLSearchParams(opened.query).get('flow'), '1');
+  assert.deepEqual(got, [[{ type: 'ack', chars: 1 }, false]]);
+  const live = once(browser, 'message');
+  browser.send(JSON.stringify({ type: 'input', data: 'late command' }));
+  browser.send(JSON.stringify({ type: 'resize', cols: 3, rows: 3 }));
+  browser.send(JSON.stringify({ type: 'ping', id: 7 }));
+  await live;
+  assert.deepEqual(got.map(([msg]) => msg.type), ['ack', 'ping']);
+});
+
+test('Read relay: mixed and fragmented screen input cannot smuggle control instructions', async (t) => {
+  const hub = await startHub({ readOnly: true, kind: 'screen' });
+  t.after(() => hub.close());
+  const key = generateAgentKey();
+  hub.agents.register('pc', key.publicKey);
+  const got = [];
+  let opened;
+  await startAgent(hub, key, {
+    onOpen(msg, dialStream) {
+      opened = msg;
+      setTimeout(() => {
+        const ws = dialStream();
+        const parser = new GuacParser();
+        ws.on('message', (data) => {
+          for (const { elements } of parser.push(data.toString())) {
+            got.push(elements);
+            if (elements[0] === 'sync') ws.send(`fence ${elements[1]}`);
+          }
+        });
+      }, 50);
+    },
+  });
+  const browser = new WebSocket(`${hub.base}/ws/screen?source=session&match=1&monitor=HDMI-1&path=direct&readonly=0`);
+  await once(browser, 'open');
+  const early = once(browser, 'message');
+  browser.send(encode(['key', 65, 1]) + encode(['mouse', 1, 2, 1]) + encode(['size', 800, 600]) + encode(['clipboard', 0, 'text/plain']) + encode(['blob', 0, 'YQ==']) + encode(['end', 0]));
+  browser.send(encode(['sync', 1]));
+  assert.equal((await early)[0].toString(), 'fence 1');
+  assert.deepEqual(got, [['sync', '1']]);
+  const q = new URLSearchParams(opened.query);
+  assert.equal(q.get('source'), 'mirror');
+  assert.equal(q.get('readonly'), '1');
+  for (const key of ['match', 'monitor', 'path']) assert.equal(q.has(key), false);
+  const live = once(browser, 'message');
+  const keyInput = encode(['key', 66, 1]);
+  browser.send(keyInput.slice(0, 4));
+  browser.send(keyInput.slice(4) + encode(['clipboard', 1, 'text/plain']) + encode(['blob', 1, 'Yg==']) + encode(['end', 1]) + encode(['sync', 2]));
+  assert.equal((await live)[0].toString(), 'fence 2');
+  assert.deepEqual(got, [['sync', '1'], ['sync', '2']]);
+});
+
+test('Read relay: video acknowledgements and keyframe requests remain available', async (t) => {
+  const hub = await startHub({ readOnly: true, kind: 'video' });
+  t.after(() => hub.close());
+  const key = generateAgentKey();
+  hub.agents.register('pc', key.publicKey);
+  const got = [];
+  await startAgent(hub, key, {
+    onOpen(_msg, dialStream) {
+      const ws = dialStream();
+      ws.on('message', (data) => { got.push(JSON.parse(data)); ws.send('frame'); });
+    },
+  });
+  const browser = new WebSocket(`${hub.base}/ws/video?tunnel=test`);
+  await once(browser, 'open');
+  const frame = once(browser, 'message');
+  browser.send(JSON.stringify({ type: 'input', data: 'command' }));
+  browser.send(JSON.stringify({ type: 'key' }));
+  await frame;
+  assert.deepEqual(got, [{ type: 'key' }]);
+  const next = once(browser, 'message');
+  browser.send(JSON.stringify({ type: 'ack', seq: 1 }));
+  await next;
+  assert.deepEqual(got, [{ type: 'key' }, { type: 'ack', seq: 1 }]);
+});
+
+test('Read relay: older agents are refused before any stream starts', async (t) => {
+  const hub = await startHub({ readOnly: true });
+  t.after(() => hub.close());
+  const key = generateAgentKey();
+  hub.agents.register('pc', key.publicKey);
+  let opens = 0;
+  await startAgent(hub, key, { capabilities: { terminal: true }, onOpen: () => opens++ });
+  const browser = new WebSocket(`${hub.base}/ws/term`);
+  const [code, reason] = await once(browser, 'close');
+  assert.equal(code, 4005);
+  assert.match(reason.toString(), /needs an update for Read access/);
+  assert.equal(opens, 0);
+});
+
+test('relay: revoked pending streams cannot attach or forward previously held input', async (t) => {
+  const hub = await startHub();
+  t.after(() => hub.close());
+  const key = generateAgentKey();
+  hub.agents.register('pc', key.publicKey);
+  let opened;
+  const opening = new Promise((resolve) => { opened = resolve; });
+  await startAgent(hub, key, { onOpen: (_msg, dialStream) => opened(dialStream) });
+  const browser = new EventEmitter();
+  Object.assign(browser, { OPEN: 1, readyState: 1, ping: quiet, send: quiet, close: quiet });
+  t.after(() => browser.emit('close'));
+  hub.agents.openStream('pc', 'term', browser, { query: '?flow=1', user: { email: 'test@example.com' } });
+  browser.emit('message', Buffer.from('{"type":"input","data":"held command"}'), false);
+  const dial = await opening;
+  browser.emit('access-changed', 4004, 'permissions changed');
+  browser.readyState = 2; // The browser has not acknowledged the close yet.
+  const ws = dial();
+  const refused = new Promise((resolve) => ws.on('unexpected-response', (_req, res) => { res.resume(); resolve(res.statusCode); }).on('error', quiet));
+  assert.equal(await refused, 404);
+  ws.terminate();
+});
+
+test('Read relay: an offline machine is unavailable, not misreported as needing an update', async (t) => {
+  const hub = await startHub({ readOnly: true });
+  t.after(() => hub.close());
+  const browser = new WebSocket(`${hub.base}/ws/term`);
+  const [code, reason] = await once(browser, 'close');
+  assert.equal(code, 1011);
+  assert.match(reason.toString(), /not connected/);
 });

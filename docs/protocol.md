@@ -6,7 +6,7 @@ Status: version 1. The local agent (a Node shim around the current host code, `s
 
 ## Roles
 
-- **Hub.** Serves the page, signs people in (Cloudflare Access), keeps the registry of agents, mints join tokens, relays streams. Never decodes a stream.
+- **Hub.** Serves the page, signs people in (Cloudflare Access), keeps the registry of agents, mints join tokens, relays streams. It filters browser input on Read-only streams, but never decodes screen or terminal output.
 - **Agent.** One per machine. Dials out to the hub and keeps one control socket open; opens a stream socket each time the hub asks.
 - **Browser.** Talks only to the hub, with the same endpoints it uses today (`/ws/screen`, `/ws/video`, `/ws/term`, `/api/...`), directly for the local machine or under `/h/<agent id>/` for any machine.
 
@@ -22,7 +22,7 @@ An agent cannot sign in as a person, so the hub's Cloudflare Access application 
 
 ## Joining
 
-1. A signed-in person mints a join token in the hub UI (`POST /api/join-tokens`, same origin). A token is 32 random bytes, base64url, usable once, valid for 15 minutes. The hub keeps only its SHA-256.
+1. An admin, or a signed-in person allowed to add machines, mints a join token in the hub UI (`POST /api/join-tokens`, same origin). A token is 32 random bytes, base64url, usable once, valid for 15 minutes. The hub keeps its SHA-256, expiry and issuer email. The issuer must still be allowed to add machines when the token is used or used to download an agent.
 2. The agent creates an Ed25519 key pair, keeps the private key in its config directory (mode 600), and sends:
 
 ```
@@ -35,7 +35,7 @@ Content-Type: application/json
 
 `os` is `linux` or `windows` and `arch` is `x86_64` or `aarch64` (Rust's names for them); the hub treats both as opaque text and uses `<os>-<arch>` as the platform of updates.
 
-3. The hub answers `200 {"id": "<agent id>", "protocol": 1, "releaseKey": "<base64url raw Ed25519 public key>"}` and stores the public key under that id, `401 {"error": ...}` for an unknown, used or expired token, or `400 {"error": ...}` for a missing name or a bad key. The token is used up by any answer but 400. The id is a slug of the name, made unique by the hub (`a-z`, `0-9`, `-`, at most 63 characters, never `local`).
+3. The hub answers `200 {"id": "<agent id>", "protocol": 1, "releaseKey": "<base64url raw Ed25519 public key>"}` and stores the public key under that id, `401 {"error": ...}` for an unknown, used, expired or revoked token, or `400 {"error": ...}` for a missing name or a bad key. The token is used up by any answer but 400. A non-admin issuer automatically receives Edit access to the joined machine; ownership fields in the join body are ignored. The id is a slug of the name, made unique by the hub (`a-z`, `0-9`, `-`, at most 63 characters, never `local`).
 
 `POST /agent/v1/join` is the only plain HTTP request under `/agent/`; the token is its authentication. Removing a machine in the hub (`DELETE /api/hosts/<id>`, same origin) deletes its key; its control socket is closed with 4001, after which the agent stops reconnecting, and later connections are refused.
 
@@ -73,7 +73,7 @@ The agent reconnects after a drop at once, then after 1, 2, 4, 8 and 15 s (reset
 
 ```json
 { "screen": { "sources": ["mirror", "virtual", "session"], "encodings": ["images", "av1", "h264"] },
-  "terminal": true, "files": true, "metrics": true }
+  "terminal": true, "files": true, "metrics": true, "readOnly": true }
 ```
 
 A machine without an available screen sends `"screen": null`. Optional `notes` gives plain-text explanations keyed by feature, for example:
@@ -87,26 +87,28 @@ The hub replaces the complete capability object on a `capabilities` message, inc
 
 A portal screen advertises `"screen": {"sources": ["mirror"], "encodings": ["images", ...], "backend": "portal"}`. Only installed encoders are listed. `mirror` shares the monitor chosen in the machine's portal dialog; `virtual`, `session`, monitor switching and `match=1` are not supported by this backend. The hub never interprets `backend` as an operating system.
 
+`readOnly: true` says the agent enforces Read-only stream input and startup restrictions (below). The hub refuses Read-only screen, video and terminal streams on older agents without this capability, rather than allowing their startup to change a desktop or terminal.
+
 ### Hub to agent
 
 | type | Fields | When |
 | --- | --- | --- |
 | `welcome` | `protocol`, `hub: {version}`, `id`, `metrics: {intervalMs}` | Answer to `hello`. The agent sends nothing else before it. |
 | `ping` | `id` | Every 20 s. Either side closes a control socket that has received nothing for 60 s. |
-| `open` | `stream`, `kind`, `query`, `user: {email}`, and for `file` `headers` | A browser opened a stream; the agent dials it within 10 s. |
+| `open` | `stream`, `kind`, `query`, `user: {email}`, optional `readOnly: true`, and for `file` `headers` | A browser opened a stream; the agent dials it within 10 s. |
 | `request` | `id`, `method`, `path`, `query`, `body`, `user: {email}` | A browser called the machine's API. |
 | `metrics-rate` | `intervalMs` | 1000 while someone views the machine's dashboard, 15000 otherwise. |
 | `update` | `version`, `path`, `sha256`, `size`, `signature` | After `hello`, when the hub has a newer build for the agent's `os` and `arch` than `agent.version`. |
 
-`stream` is 16 random bytes, base64url, made by the hub. `query` is the browser's query string unchanged (with the leading `?`, or empty); the agent validates it exactly as the endpoint does today, since the browser is not trusted to send sane values. For `file`, `query` is `token=<token>&name=<name>` from the path, and `headers` carries the browser's `range`, `if-none-match` and `if-modified-since` when present.
+`stream` is 16 random bytes, base64url, made by the hub. `query` is the browser's query string (with the leading `?`, or empty); the agent validates it exactly as the endpoint does today, since the browser is not trusted to send sane values. For Read-only streams, the hub sets `readonly=1` and, for screens, forces `source=mirror` and removes monitor switching, matching and the direct path. The agent also enforces the `readOnly` field, regardless of conflicting query values. For `file`, `query` is `token=<token>&name=<name>` from the path, and `headers` carries the browser's `range`, `if-none-match` and `if-modified-since` when present.
 
 ### Requests
 
-The machine's API (today's `/api/session`, `/api/session/stop`, `/api/monitors`) goes over `request` and `response`, with `path` as the browser used it without the `/h/<id>` prefix. The hub answers `/api/host` itself from the agent's `hello`. The hub answers the browser with `status` and `body` as JSON, `Cache-Control: no-store`, and 504 if no response arrives within 10 s. The hub has already checked the person and, for anything but `GET`, that the request is same-origin.
+The machine's API (today's `/api/session`, `/api/session/stop`, `/api/monitors`) goes over `request` and `response`, with `path` as the browser used it without the `/h/<id>` prefix. The hub answers `/api/host` itself from the agent's `hello`. The hub answers the browser with `status` and `body` as JSON, `Cache-Control: no-store`, and 504 if no response arrives within 10 s. The hub has already checked machine Read access and, for anything but `GET`, Edit access and that the request is same-origin. `/api/host` and `/api/hosts` expose the person's machine `access` as `read` or `edit`; `/api/me` exposes `canAddMachines` independently of `admin`.
 
 ## Stream sockets
 
-`GET /agent/v1/stream/<stream id>`, dialled by the agent after `open`. The hub pairs it with the browser's socket and from then on copies every message in both directions unchanged, text as text and binary as binary, in order. A close on one side closes the other with the same code and reason. Codes a peer may send (1000, 1001, 1007 to 1014, 3000 to 4999) are passed as they are, a close without a code (1005) is passed without one, and anything else, such as a dropped connection (1006), becomes 1011. The hub sends its own WebSocket pings to the browser every 25 s; WebSocket pings and pongs are not relayed. Messages are relayed as they come, without flow control of their own: what the browser's socket has not sent yet waits in the hub.
+`GET /agent/v1/stream/<stream id>`, dialled by the agent after `open`. The hub pairs it with the browser's socket and copies output unchanged, text as text and binary as binary, in order. Edit streams also copy browser input unchanged; Read-only streams use the input allowlist below. A close on one side closes the other with the same code and reason. Codes a peer may send (1000, 1001, 1007 to 1014, 3000 to 4999) are passed as they are, a close without a code (1005) is passed without one, and anything else, such as a dropped connection (1006), becomes 1011. The hub sends its own WebSocket pings to the browser every 25 s; WebSocket pings and pongs are not relayed. Messages are relayed as they come, without flow control of their own: what the browser's socket has not sent yet waits in the hub.
 
 Messages from the browser that arrive before the agent's socket are held, up to 64 messages or 256 KB, then the browser's socket is closed with 1013. If no agent socket arrives within 10 s, or the agent sends `stream-failed`, the browser's socket is closed with 1011 and the reason.
 
@@ -118,6 +120,16 @@ Each kind uses the messages of today's endpoint, documented in [architecture.md]
 | `video` | `/ws/video?tunnel=<uuid>` | Binary frames and JSON text, as in architecture.md, Video encodings. |
 | `term` | `/ws/term` | JSON text in both directions, binary control frames to the browser. |
 | `file` | `GET /api/files/<token>/<name>` | First a text message `{"status", "headers"}`, then the body as binary messages of at most 64 KB, then a close with 1000. The agent answers a single byte range with 206 and `Content-Range`, and `Accept-Ranges: bytes` always. |
+
+### Read-only streams
+
+Read includes dashboards, screen pictures and terminal output; Edit includes Read and allows control. Existing machine grants remain Edit. The hub filters both held and live browser messages, and the agent independently applies these restrictions:
+
+- **Screen:** only Guacamole `sync`, `ack`, `nop`, `disconnect` and internal `ping` are accepted. Keyboard, pointer, resize, clipboard input and any other input instructions are dropped, including mixed or fragmented messages. The local GNOME path shows only an already-sharing physical monitor: it does not start a desktop or sharing service, change share mode, acquire a monitor or resize one. A Read-only viewer cannot replace an existing viewer. The portal path requests ScreenCast only, without control or clipboard, and retains its own view-only and clipboard restrictions even on Edit streams.
+- **Terminal:** only JSON `ack` and `ping` are accepted. Input and resize are dropped. A Linux viewer attaches to an existing tmux session with read-only and ignore-size flags, without creating a session or changing its environment. A Windows viewer subscribes to an existing shell without starting or resizing it.
+- **Video:** only frame `ack` and keyframe `key` requests are accepted; these are playback flow control, not keyboard input.
+
+The hub closes streams with 4003 when machine access is removed, 4004 when the Read/Edit level changes, or 4005 when a connected agent needs an update to support Read. Clients refresh machine access before reconnecting after 4004; 4005 shows an update-and-reconnect message instead of retrying forever. Permission changes stop input forwarding immediately, without waiting for the close handshake.
 
 Portal `screen` streams use the same Guacamole subset as the local direct path: the tunnel id first, then `size` and `sync`, with `nop` and replies to internal `ping` while the portal waits for approval. `name` carries a plain-text session notice (waiting for approval, view only or unavailable clipboard); an empty `name` clears it when sharing starts with full control. The page shows notices as status and a toast, never as markup. A refused or ended share sends `error` and closes; it is not automatically retried. The stream socket still dials within 10 s: the approval wait happens after pairing, not before it.
 
@@ -161,3 +173,4 @@ What a Windows agent sends: `cpu.total` and `cpu.cores` as user, 0, system (kern
 | 1 | 2026-11-13 | Added within version 1 (unknown fields and types are ignored): `releaseKey` in the join answer, the `update` message, signed GETs of `/agent/v1/download/`. |
 | 1 | 2026-11-16 | Added within version 1: `os: "windows"`, the platform `windows-x86_64`, `memory.commitB` and `memory.commitLimitB`. |
 | 1 | 2026-11-16 | Added within version 1: complete `capabilities` updates, optional capability `notes` and `screen.backend`, and portal screen session notices through Guacamole `name`. |
+| 1 | 2026-11-16 | Added within version 1: issuer-bound join tokens, automatic Edit grants, the `readOnly` capability and stream field, and Read-only input and startup restrictions. |

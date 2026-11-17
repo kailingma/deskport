@@ -8,6 +8,7 @@ import { createMachines } from './js/machines.js';
 import { createPeople } from './js/people.js';
 import { ask } from './js/dialog.js';
 import { pictureOptions, screenChoices, SCREEN_SOURCES, SCREEN_ENCODINGS } from './js/screen-options.js';
+import { canEdit, screenPermissionsFor } from './js/permissions.js';
 
 const $ = (id) => document.getElementById(id);
 // The machine the Screen and Terminal views show; the Machines view switches it.
@@ -64,7 +65,7 @@ function toast(text, { action, ms } = {}) {
 
 let me = null;
 // The machine being shown, including its screen capabilities and availability note.
-let machine = { id: 'local', name: '', local: true, screen: true, terminal: true };
+let machine = { id: 'local', name: '', local: true, screen: true, terminal: true, access: null };
 let screenPermissions = { control: true, clipboard: true };
 
 function showMachineName() {
@@ -76,26 +77,48 @@ function showMachineName() {
   $('no-screen').querySelector('[data-view="term"]').hidden = !machine.terminal;
 }
 
-hub.json('/api/me').then((data) => {
-  me = data;
-  document.body.classList.toggle('is-admin', Boolean(data.admin));
-  showMachineName();
-}).catch(() => {});
+async function refreshMe() {
+  try {
+    const data = await hub.json('/api/me');
+    const changed = Boolean(me?.canAddMachines) !== Boolean(data.canAddMachines);
+    me = data;
+    document.body.classList.toggle('is-admin', Boolean(data.admin));
+    document.body.classList.toggle('can-add-machines', Boolean(data.canAddMachines));
+    showMachineName();
+    if (changed) machines.refresh();
+  } catch {}
+}
+refreshMe();
+
+/** Refresh before reopening streams whose Read/Edit grant changed. */
+async function refreshAccess() {
+  const id = host.id;
+  try {
+    const data = await host.json('/api/host');
+    if (host.id !== id) return false;
+    useMachine({ ...machine, id: data.id, access: data.access }, { quiet: true, reconnect: false });
+    return true;
+  } catch {
+    machines.refresh();
+    return false;
+  }
+}
 
 const screen = createScreen({
-  host, setStatus, toast, machine: () => machine,
+  host, setStatus, toast, machine: () => machine, refreshAccess,
   onPermissions(permissions) { screenPermissions = permissions; syncInputControls(); },
 });
-const term = createTerminal({ host, setStatus, toast });
+const term = createTerminal({ host, setStatus, toast, machine: () => machine, refreshAccess });
 
 /** Points Screen and Terminal at another machine, reconnecting what was connected. */
-function useMachine(m, { quiet = false } = {}) {
+function useMachine(m, { quiet = false, reconnect = true } = {}) {
   noMachines = false;
   const same = m.id === machine.id || (m.local && machine.local);
   const next = {
     id: m.local ? 'local' : m.id, name: m.name, local: Boolean(m.local), screen: Boolean(m.screen), terminal: m.terminal !== false,
     screenSources: m.screenSources ?? [], screenEncodings: m.screenEncodings ?? [],
     screenBackend: m.screenBackend, screenNote: m.screenNote ?? null,
+    access: m.access ?? null,
   };
   if (same && JSON.stringify(next) === JSON.stringify(machine)) return;
   const previous = machine;
@@ -110,12 +133,14 @@ function useMachine(m, { quiet = false } = {}) {
     settings.useHost(m.id, machine.local);
   }
   syncSource();
+  screen.syncPermissions();
   syncInputControls();
   const changed = !same || machine.screen !== previous.screen || machine.screenBackend !== previous.screenBackend
+    || machine.access !== previous.access
     || before !== JSON.stringify(pictureOptions(machine, settings.get));
   if (!machine.screen) screen.stop();
   else if (changed) {
-    if (view === 'screen') screen.reconnect();
+    if (view === 'screen' && reconnect) screen.reconnect({ permissionsChanged: same && machine.access !== previous.access });
     // A different machine: drop the old connection so its late video,
     // clipboard or connect callbacks cannot reach the new one.
     else if (!same) screen.close();
@@ -125,6 +150,7 @@ function useMachine(m, { quiet = false } = {}) {
     term.stop();
     if (view === 'term') showView('machines');
   } else if (!same) term.switchHost();
+  else if (machine.access !== previous.access) term.permissionsChanged({ reconnect });
   else if (!previous.terminal && view === 'term') term.ensureConnected();
   if (settingsDialog.open) {
     syncSettingsForm();
@@ -138,6 +164,7 @@ const machines = createMachines({
   toast,
   currentId: () => machine.id,
   watchSelected: () => !machine.local,
+  canAddMachines: () => Boolean(me?.canAddMachines),
   open(m, which) {
     useMachine(m);
     showView(which === 'screen' && !m.screen ? 'term' : which);
@@ -147,6 +174,7 @@ const machines = createMachines({
     else {
       const online = list.filter((m) => m.status === 'online').length;
       setStatus('machines', 'ok', `${online} of ${list.length} online`);
+      refreshMe();
     }
     // The shown machine was removed or taken away: the hub's own, else the
     // first one this person has, else none.
@@ -384,7 +412,7 @@ function syncSettingsForm() {
     ? 'The monitor chosen in this machine\'s sharing dialog. Its resolution is not changed. Someone there must allow the first connection.'
     : SOURCE_HELP[source];
   const matched = options.matchMonitor;
-  $('monitor-rows').hidden = !machine.local || source !== 'mirror';
+  $('monitor-rows').hidden = !canEdit(machine) || !machine.local || source !== 'mirror';
   $('set-match').checked = settings.get('matchMonitor');
   $('match-help').textContent = settings.get('matchMonitor')
     ? 'While you are connected, the monitor switches to the resolution closest to this device. It switches back a few seconds after you disconnect.'
@@ -457,6 +485,7 @@ settingsDialog.addEventListener('keydown', (e) => {
 settingsDialog.addEventListener('input', async (e) => {
   const t = e.target;
   if (t.id === 'set-match') {
+    if (!canEdit(machine)) return;
     if (!t.checked) settings.set('matchMonitor', false);
     else {
       t.checked = false;
@@ -539,7 +568,7 @@ function openSettings() {
 
 async function refreshSession() {
   const row = $('session-row');
-  if (!machine.local) { row.hidden = true; return; }
+  if (!machine.local || !canEdit(machine)) { row.hidden = true; return; }
   const id = host.id;
   try {
     const s = await host.json('/api/session');
@@ -558,6 +587,7 @@ async function refreshSession() {
 }
 
 async function endSession() {
+  if (!canEdit(machine)) return;
   const ok = await ask({
     title: 'End the separate desktop?',
     body: 'Apps open in it will close. It starts again the next time you show it.',
@@ -658,12 +688,17 @@ async function hardReload() {
 const sheet = $('sheet');
 
 function syncInputControls() {
-  const control = machine.screen && screenPermissions.control;
+  const permissions = screenPermissionsFor(machine, screenPermissions);
+  const control = machine.screen && permissions.control;
+  const terminalControl = machine.terminal && canEdit(machine);
+  const activeControl = view === 'screen' ? control : view === 'term' && terminalControl;
   for (const b of document.querySelectorAll('[data-action="super"], [data-action="cad"]')) b.disabled = !control;
-  for (const b of document.querySelectorAll('[data-action="clipboard"]')) b.disabled = !machine.screen || !screenPermissions.clipboard;
-  for (const b of document.querySelectorAll('[data-action="keyboard"]')) b.disabled = view === 'screen' && !control;
+  for (const b of document.querySelectorAll('[data-action="clipboard"]')) b.disabled = !machine.screen || !permissions.clipboard;
+  for (const b of document.querySelectorAll('[data-action="paste"]')) b.disabled = !terminalControl;
+  for (const b of document.querySelectorAll('[data-action="keyboard"]')) b.disabled = !activeControl;
   document.body.classList.toggle('screen-view-only', !control);
-  $('keyrow').inert = view === 'screen' && !control;
+  document.body.classList.toggle('term-view-only', !terminalControl);
+  $('keyrow').inert = !activeControl;
 }
 
 const actions = {
@@ -686,7 +721,7 @@ const actions = {
 
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-action]');
-  if (!btn) return;
+  if (!btn || btn.disabled) return;
   if (btn.closest('#sheet')) sheet.close();
   actions[btn.dataset.action]?.();
   const keepFocus = ['reconnect', 'settings', 'close-settings', 'sheet'].includes(btn.dataset.action);
@@ -702,7 +737,7 @@ const keyrow = $('keyrow');
 keyrow.addEventListener('pointerdown', (e) => e.preventDefault());
 keyrow.addEventListener('click', (e) => {
   const btn = e.target.closest('button');
-  if (!btn) return;
+  if (!btn || keyrow.inert) return;
   if (btn.dataset.mod) return toggleMod(btn.dataset.mod);
   if (btn.dataset.action) return;
   (view === 'screen' ? screen : term).key(btn.dataset.key);

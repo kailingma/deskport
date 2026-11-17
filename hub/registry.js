@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { slugify, LOCAL } from './hosts.js';
 import { publicKeyFrom, PROTOCOL } from './protocol.js';
+import { cleanEmail } from './access.js';
 
 // Machines that joined this hub (docs/protocol.md, Joining): their keys in
 // agents.json in the config directory, one-use join tokens, and an hour of
@@ -25,9 +26,9 @@ export class JoinError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-export function createRegistry({ file, agents, reservedIds = [], releaseKey = null, log, now = () => Date.now() }) {
+export function createRegistry({ file, agents, access, reservedIds = [], releaseKey = null, log, now = () => Date.now() }) {
   const machines = new Map(); // id -> { id, name, os, arch, publicKey, joinedAt }
-  const tokens = new Map(); // sha256 -> expires
+  const tokens = new Map(); // sha256 -> { expires, issuer }
   const metrics = new Map(); // id -> [{ t, sample }]
   const live = new Map(); // id -> timer that ends the live rate
 
@@ -79,18 +80,20 @@ export function createRegistry({ file, agents, reservedIds = [], releaseKey = nu
 
   return {
     /** A new join token; only its hash is kept. */
-    mintToken() {
+    mintToken(issuer) {
+      issuer = cleanEmail(issuer);
+      if (!access.canAddMachines(issuer)) throw new JoinError(403, 'you may not add machines');
       const token = crypto.randomBytes(32).toString('base64url');
       const t = now();
-      for (const [h, exp] of tokens) if (exp < t) tokens.delete(h);
-      tokens.set(sha256(token), t + TOKEN_TTL_MS);
+      for (const [h, entry] of tokens) if (entry.expires < t) tokens.delete(h);
+      tokens.set(sha256(token), { expires: t + TOKEN_TTL_MS, issuer });
       return { token, expiresAt: t + TOKEN_TTL_MS };
     },
 
     /** Whether token is a join token that is still usable (it is not used up). */
     tokenValid(token) {
-      const exp = tokens.get(sha256(String(token || '')));
-      return Boolean(exp && exp >= now());
+      const entry = tokens.get(sha256(String(token || '')));
+      return Boolean(entry && entry.expires >= now() && access.canAddMachines(entry.issuer));
     },
 
     /** POST /agent/v1/join. Returns { id, protocol } or throws JoinError. */
@@ -99,14 +102,23 @@ export function createRegistry({ file, agents, reservedIds = [], releaseKey = nu
       if (!name) throw new JoinError(400, 'name is required');
       try { publicKeyFrom(String(body?.publicKey || '')); } catch { throw new JoinError(400, 'publicKey must be a raw Ed25519 key, base64url'); }
       const h = sha256(String(body?.token || ''));
-      const exp = tokens.get(h);
+      const entry = tokens.get(h);
       tokens.delete(h);
-      if (!exp || exp < now()) throw new JoinError(401, 'unknown, used or expired join token');
+      if (!entry || entry.expires < now()) throw new JoinError(401, 'unknown, used or expired join token');
+      if (!access.canAddMachines(entry.issuer)) throw new JoinError(401, 'the person who made this token may no longer add machines');
       const id = uniqueId(name);
       const m = { id, name, os: text(body.os, 32), arch: text(body.arch, 32), publicKey: body.publicKey, joinedAt: new Date(now()).toISOString() };
       agents.register(id, m.publicKey);
       machines.set(id, m);
-      save();
+      try {
+        save();
+        access.grantEdit(entry.issuer, id);
+      } catch (err) {
+        machines.delete(id);
+        agents.remove(id);
+        save();
+        throw err;
+      }
       log(`machine ${id} joined (${m.os} ${m.arch})`);
       return { id, protocol: PROTOCOL, ...(releaseKey ? { releaseKey } : {}) };
     },

@@ -76,7 +76,7 @@ export function createHostRegistry({ config, sources, version, log }) {
         name: self.name,
         version,
         ui: config.ui,
-        capabilities: { screen: { sources }, terminal: true },
+        capabilities: { screen: { sources }, terminal: true, readOnly: true },
       };
     },
 

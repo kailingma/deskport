@@ -8,7 +8,7 @@ import { LOCAL } from './hosts.js';
 //   describe()                 what GET /api/host answers
 //   request({method, path, query, user})  -> { status, body }
 //   file(req, res)             GET /api/files/:token/:name
-//   stream(kind, ws, req)      a browser's /ws/<kind> socket
+//   stream(kind, ws, req, { readOnly })  a browser's /ws/<kind> socket
 //   offers(kind)               whether stream(kind) can work
 //   metrics({since, live})     recent metrics samples
 
@@ -30,10 +30,11 @@ function agentMachine(id, agents, registry, describe, { wait = false } = {}) {
       headers: Object.fromEntries(FILE_HEADERS.filter((h) => req.headers[h]).map((h) => [h, req.headers[h]])),
       user: { email: req.user.email },
     }, res, { wait }),
-    stream: (kind, ws, req) => agents.openStream(id, kind, ws, {
+    stream: (kind, ws, req, { readOnly = false } = {}) => agents.openStream(id, kind, ws, {
       query: new URL(req.url, 'http://localhost').search,
       user: { email: req.user.email },
       wait,
+      readOnly,
     }),
     metrics: (opts) => registry.metrics(id, opts),
   };
@@ -50,7 +51,7 @@ export function createMachines({ hosts, agents, registry, local }) {
           return handler ? handler() : { status: 404, body: { error: 'not found' } };
         },
         file: (req, res) => local.opener.serveFile(req, res),
-        stream: (kind, ws, req) => local.streams[kind](ws, req.url.replace(/^\/h\/[^/?]+/, '')),
+        stream: (kind, ws, req, options) => local.streams[kind](ws, req.url.replace(/^\/h\/[^/?]+/, ''), options),
         metrics: (opts) => registry.metrics(selfId, opts),
       }
     // The shim is always expected, so requests wait for it while it (re)starts.

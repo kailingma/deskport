@@ -27,7 +27,12 @@ const CLIP_MAX = 1 << 20;
 // Guacamole sends stream data as base64 in pieces of at most this many bytes.
 const BLOB_BYTES = 6144;
 
-export function handleDirect(ws, { width, height, dpi, encoding, speed, quality, priority, bitrate, session, video, log }) {
+export function handleDirect(ws, { width, height, dpi, encoding, speed, quality, priority, bitrate, session, video, log, readOnly = false }) {
+  if (readOnly) {
+    ws.send(encode(['error', 'Read access can only view the existing monitor.', '519']));
+    ws.close(1011, '519');
+    return;
+  }
   let layout = sessionLayout(width, height, dpi);
   let source = null;
   let uuid = null;

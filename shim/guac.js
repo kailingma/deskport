@@ -8,75 +8,10 @@ import { createAckAhead, lastSyncTimestamp } from './pacing.js';
 import { createDrawFilter, createVideoSource, ENCODINGS, BITRATES } from './video.js';
 import { handleDirect } from './direct.js';
 import { claimScreen } from './screen-claim.js';
+import { encode, GuacParser } from './guac-protocol.js';
+import { createReadOnlyFilter } from './readonly.js';
 
-// Guacamole protocol: each element is "<length>.<value>", elements are
-// separated by "," and an instruction ends with ";". Lengths count Unicode
-// code points, not UTF-16 units or bytes.
-
-const ASCII_ONLY = /^[\x00-\x7f]*$/;
-
-function codePointLength(s) {
-  if (ASCII_ONLY.test(s)) return s.length;
-  let n = 0;
-  for (const _ of s) n++;
-  return n;
-}
-
-export function encode(elements) {
-  return elements.map((e) => {
-    const s = String(e);
-    return `${codePointLength(s)}.${s}`;
-  }).join(',') + ';';
-}
-
-/** Index just past `count` code points starting at `start`, or -1 if the string ends first. */
-function advanceCodePoints(s, start, count) {
-  const fastEnd = start + count;
-  if (fastEnd > s.length) return -1;
-  if (!/[\uD800-\uDBFF]/.test(s.slice(start, fastEnd))) return fastEnd;
-  let i = start;
-  for (let n = 0; n < count; n++) {
-    if (i >= s.length) return -1;
-    const c = s.charCodeAt(i);
-    i += c >= 0xd800 && c <= 0xdbff ? 2 : 1;
-  }
-  return i > s.length ? -1 : i;
-}
-
-export class GuacParser {
-  buf = '';
-
-  /** Appends text and returns every complete instruction as {raw, elements}. */
-  push(text) {
-    this.buf += text;
-    const s = this.buf;
-    const out = [];
-    let pos = 0;
-    let instStart = 0;
-    let elements = [];
-
-    while (pos < s.length) {
-      const dot = s.indexOf('.', pos);
-      if (dot === -1) break;
-      const lenStr = s.slice(pos, dot);
-      if (!/^\d{1,9}$/.test(lenStr)) throw new Error(`malformed Guacamole instruction near "${s.slice(pos, pos + 20)}"`);
-      const end = advanceCodePoints(s, dot + 1, Number(lenStr));
-      if (end === -1 || end >= s.length) break;
-      const term = s[end];
-      if (term !== ',' && term !== ';') throw new Error('malformed Guacamole instruction terminator');
-      elements.push(s.slice(dot + 1, end));
-      pos = end + 1;
-      if (term === ';') {
-        out.push({ raw: s.slice(instStart, pos), elements });
-        instStart = pos;
-        elements = [];
-      }
-    }
-
-    this.buf = s.slice(instStart);
-    return out;
-  }
-}
+export { encode, GuacParser } from './guac-protocol.js';
 
 const STATUS_UPSTREAM_NOT_FOUND = 0x0204;
 const STATUS_SERVER_ERROR = 0x0200;
@@ -228,6 +163,14 @@ async function desktopSharingReady(host, port, log) {
   throw new Error(`GNOME desktop sharing is not answering on port ${port}. Check that desktop sharing is on in Settings, System, Remote Desktop on the computer.`);
 }
 
+/** A viewer must not start sharing or turn an extend-mode connection into a new monitor. */
+async function readOnlySharingReady(host, port) {
+  if (!LOOPBACK.has(host)) throw new Error('Read access cannot verify this remote RDP server\'s mirror mode. Join that machine with an agent instead.');
+  if (!(await portOpen(host, port))) throw new Error('The monitor is not being shared. Ask someone with Edit access to open My monitor first.');
+  const { stdout } = await run('gsettings', ['get', 'org.gnome.desktop.remote-desktop.rdp', 'screen-share-mode']);
+  if (stdout.trim() !== "'mirror-primary'") throw new Error('The monitor is not in mirror mode. Ask someone with Edit access to open My monitor first.');
+}
+
 const BASE_PARAMS = {
   'color-depth': '24',
   'enable-font-smoothing': 'true',
@@ -242,8 +185,10 @@ const VIDEO_SELF_ACK_MS = 250;
 // The current viewer for each source (screen-claim.js).
 const screenClaims = new Map();
 
-export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, mainBus }, log) {
+export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, mainBus, readOnly = false }, log) {
   const url = new URL(req.url, 'http://localhost');
+  readOnly ||= url.searchParams.get('readonly') === '1';
+  const filterInput = readOnly ? createReadOnlyFilter('screen') : (data) => data;
   const width = intParam(url.searchParams.get('width'), 1280, 320, 7680);
   const height = intParam(url.searchParams.get('height'), 720, 240, 4320);
   const dpi = intParam(url.searchParams.get('dpi'), 96, 48, 384);
@@ -263,11 +208,11 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
   // With a video encoding the browser's own acknowledgements are not used:
   // guacd's pictures are dropped, so the bridge acknowledges its frames itself.
   const minFrameMs = videoMode ? 0 : priority === 'data' ? DATA_SAVER_FRAME_MS : 0;
-  const source = SOURCES.has(q.get('source')) ? q.get('source') : 'mirror';
+  const source = !readOnly && SOURCES.has(q.get('source')) ? q.get('source') : 'mirror';
   // My monitor only: "match" changes the monitor's mode to fit this browser
   // while it is connected; "monitor" names the monitor to show (monitors.js).
-  const match = source === 'mirror' && q.get('match') === '1';
-  const monitor = source === 'mirror' && /^[A-Za-z0-9-]{1,32}$/.test(q.get('monitor') || '') ? q.get('monitor') : 'primary';
+  const match = !readOnly && source === 'mirror' && q.get('match') === '1';
+  const monitor = !readOnly && source === 'mirror' && /^[A-Za-z0-9-]{1,32}$/.test(q.get('monitor') || '') ? q.get('monitor') : 'primary';
   // Extra monitors and the separate desktop are already the browser's size, so
   // they never need shrinking.
   const sized = source !== 'mirror';
@@ -297,21 +242,22 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
     'server-layout': 'en-us-qwerty',
     timezone,
     ...BASE_PARAMS,
+    ...(readOnly ? { 'read-only': 'true', 'disable-paste': 'true', 'resize-method': 'none' } : {}),
     ...(quality === 'lossless' ? { 'force-lossless': 'true' } : {}),
   };
 
   let releaseMonitors = null;
   ws.on('close', () => releaseMonitors?.());
-  const ready = claimScreen(screenClaims, source, ws).then(() => (source === 'session'
+  const ready = claimScreen(screenClaims, source, ws, { readOnly }).then(() => (source === 'session'
     ? session.ensureRunning()
-    : desktopSharingReady(rdp.hostname, port, log)
+    : (readOnly ? readOnlySharingReady(rdp.hostname, port) : desktopSharingReady(rdp.hostname, port, log))
       .then(async () => {
         if (LOOPBACK.has(rdp.hostname) && await desktopLocked(log)) {
           log('screen: the main desktop is locked');
           throw new Error(DESKTOP_LOCKED);
         }
       })
-      .then(() => setShareMode(source === 'virtual' ? 'extend' : 'mirror-primary', log))
+      .then(() => { if (!readOnly) return setShareMode(source === 'virtual' ? 'extend' : 'mirror-primary', log); })
       .then(async () => {
         if (!match && monitor === 'primary') return;
         const release = await monitors.acquire(match ? { width, height, monitor } : { monitor });
@@ -490,8 +436,10 @@ export function handleScreen(ws, req, { guacd, rdp, session, monitors, video, ma
 
     socket.on('close', () => { if (!upstreamError) closeAll(1000, ''); });
 
-    ws.on('message', (raw) => {
-      const msg = raw.toString();
+    ws.on('message', (raw, isBinary) => {
+      const filtered = filterInput(raw, isBinary);
+      if (filtered === null) return;
+      const msg = filtered.toString();
       // Internal tunnel instructions start with an empty opcode ("0.").
       // The browser sends "ping" this way and expects it echoed back.
       if (msg.startsWith('0.,')) {

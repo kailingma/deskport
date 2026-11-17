@@ -393,6 +393,47 @@ def write_token(path, token):
         sys.stderr.write(f"portal-screen: could not keep the restore token: {err}\n")
 
 
+def start_share(portal, Gio, GLib, bus, cfg, cursor_modes, clip_version):
+    """Read access uses ScreenCast only, never requests devices or clipboard."""
+    V = GLib.Variant
+    read_only = cfg.get("readOnly") is True
+    interface = SC if read_only else RD
+    results = portal.request(interface, "CreateSession", lambda o: V("(a{sv})", ({**o, "session_handle_token": V("s", f"deskport{os.getpid()}")},)))
+    session = results["session_handle"]
+    bus.signal_subscribe(PORTAL, "org.freedesktop.portal.Session", "Closed", session, None,
+                         Gio.DBusSignalFlags.NONE, lambda *a: fail(3, "the screen sharing session ended"))
+
+    token_file = cfg.get("tokenFile")
+    if token_file and read_only:
+        token_file += ".readonly"
+    token = read_token(token_file) if token_file else None
+
+    def persistent(o):
+        o = {**o, "persist_mode": V("u", PERSIST_UNTIL_REVOKED)}
+        if token:
+            o["restore_token"] = V("s", token)
+        return o
+
+    if not read_only:
+        portal.request(RD, "SelectDevices", lambda o: V("(oa{sv})", (session, {**persistent(o), "types": V("u", KEYBOARD | POINTER)})))
+    cursor = CURSOR_EMBEDDED if cursor_modes & CURSOR_EMBEDDED else CURSOR_HIDDEN
+    portal.request(SC, "SelectSources", lambda o: V("(oa{sv})", (session, {**(persistent(o) if read_only else o), "types": V("u", MONITOR),
+                                                                       "multiple": V("b", False), "cursor_mode": V("u", cursor)})))
+    clipboard = False
+    if clip_version and not read_only:
+        try:
+            portal.call(CLIP, "RequestClipboard", V("(oa{sv})", (session, {})))
+            clipboard = True
+        except GLib.Error as err:
+            sys.stderr.write(f"portal-screen: no clipboard: {err.message}\n")
+    message(type="asking")
+    started = portal.request(interface, "Start", lambda o: V("(osa{sv})", (session, "", o)), timeout_s=ASK_TIMEOUT_S)
+    if token_file and started.get("restore_token"):
+        write_token(token_file, started["restore_token"])
+    clipboard = clipboard and started.get("clipboard_enabled") is True
+    return session, started, clipboard
+
+
 def run(cfg):
     try:
         import gi
@@ -420,35 +461,8 @@ def run(cfg):
     except GLib.Error:
         clip_version = 0
 
-    results = portal.request(RD, "CreateSession", lambda o: V("(a{sv})", ({**o, "session_handle_token": V("s", f"deskport{os.getpid()}")},)))
-    session = results["session_handle"]
-    bus.signal_subscribe(PORTAL, "org.freedesktop.portal.Session", "Closed", session, None,
-                         Gio.DBusSignalFlags.NONE, lambda *a: fail(3, "the screen sharing session ended"))
-
-    token_file = cfg.get("tokenFile")
-    token = read_token(token_file) if token_file else None
-
-    def devices(o):
-        o = {**o, "types": V("u", KEYBOARD | POINTER), "persist_mode": V("u", PERSIST_UNTIL_REVOKED)}
-        if token:
-            o["restore_token"] = V("s", token)
-        return V("(oa{sv})", (session, o))
-    portal.request(RD, "SelectDevices", devices)
-    cursor = CURSOR_EMBEDDED if cursor_modes & CURSOR_EMBEDDED else CURSOR_HIDDEN
-    portal.request(SC, "SelectSources", lambda o: V("(oa{sv})", (session, {**o, "types": V("u", MONITOR), "multiple": V("b", False),
-                                                                         "cursor_mode": V("u", cursor)})))
-    clipboard = False
-    if clip_version:
-        try:
-            portal.call(CLIP, "RequestClipboard", V("(oa{sv})", (session, {})))
-            clipboard = True
-        except GLib.Error as err:
-            sys.stderr.write(f"portal-screen: no clipboard: {err.message}\n")
-    message(type="asking")
-    started = portal.request(RD, "Start", lambda o: V("(osa{sv})", (session, "", o)), timeout_s=ASK_TIMEOUT_S)
-    if token_file and started.get("restore_token"):
-        write_token(token_file, started["restore_token"])
-    control = (started.get("devices", 0) & (KEYBOARD | POINTER)) == (KEYBOARD | POINTER)
+    session, started, clipboard = start_share(portal, Gio, GLib, bus, cfg, cursor_modes, clip_version)
+    control = cfg.get("readOnly") is not True and (started.get("devices", 0) & (KEYBOARD | POINTER)) == (KEYBOARD | POINTER)
     if not control:
         sys.stderr.write("portal-screen: keyboard and pointer control were not allowed; view only\n")
     streams = started.get("streams") or []
@@ -456,9 +470,6 @@ def run(cfg):
         fail(3, "no screen was chosen to share")
     node, props = streams[0]
     native = tuple(props.get("size") or (1920, 1080))
-    # Only an explicit grant counts; a portal that does not say has not allowed it.
-    clipboard = clipboard and started.get("clipboard_enabled") is True
-
     res, fds = bus.call_with_unix_fd_list_sync(PORTAL, PORTAL_PATH, SC, "OpenPipeWireRemote", V("(oa{sv})", (session, {})),
                                                GLib.VariantType("(h)"), Gio.DBusCallFlags.NONE, 5000, None, None)
     pw_fd = fds.get(res.unpack()[0])

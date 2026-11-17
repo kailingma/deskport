@@ -8,6 +8,7 @@ import { SUBPROTOCOL, AGENT_PREFIX, signUpgrade } from '../hub/protocol.js';
 import { createLocalHost } from './host.js';
 import { serveFileStream } from './files.js';
 import { createCollector } from './metrics.js';
+import { readOnlyQuery } from './readonly.js';
 
 // The agent shim: this machine's host code (shim/host.js) speaking the hub
 // and agent protocol (docs/protocol.md) to a hub on loopback. The hub starts
@@ -49,12 +50,14 @@ function openStream(control, msg) {
     if (control.readyState === WebSocket.OPEN) control.send(JSON.stringify({ type: 'stream-failed', stream: msg.stream, message }));
   };
   if (!KINDS.has(msg.kind) || typeof msg.stream !== 'string' || !/^[A-Za-z0-9_-]{22}$/.test(msg.stream)) return failed('unknown stream kind');
-  const query = typeof msg.query === 'string' ? msg.query : '';
+  const original = typeof msg.query === 'string' ? msg.query : '';
+  const readOnly = msg.readOnly === true;
+  const query = readOnly ? readOnlyQuery(msg.kind, original) : original;
   const ws = dial(`${AGENT_PREFIX}stream/${msg.stream}`);
   ws.on('error', (err) => { log(`stream ${msg.kind}: ${err.message}`); failed(err.message); });
   ws.on('open', () => {
     if (msg.kind === 'file') serveFileStream(ws, query, msg.headers || {}, host.opener);
-    else host.streams[msg.kind](ws, `/ws/${msg.kind}${query && !query.startsWith('?') ? '?' : ''}${query}`);
+    else host.streams[msg.kind](ws, `/ws/${msg.kind}${query && !query.startsWith('?') ? '?' : ''}${query}`, { readOnly });
   });
 }
 
@@ -90,7 +93,7 @@ function connect() {
     ws.send(JSON.stringify({
       type: 'hello',
       agent: { version, os: process.platform, arch: os.arch(), name: config.self.name },
-      capabilities: { screen: { sources: ['mirror', 'virtual', 'session'], encodings: ['images', 'av1', 'h264'] }, terminal: true, files: true, metrics: true },
+      capabilities: { screen: { sources: ['mirror', 'virtual', 'session'], encodings: ['images', 'av1', 'h264'] }, terminal: true, files: true, metrics: true, readOnly: true },
     }));
   });
   ws.on('message', (raw, isBinary) => {

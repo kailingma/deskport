@@ -16,8 +16,11 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * resolves once it may open its RDP connection.
  * `claims` is a Map from source to { ws, released }.
  */
-export function claimScreen(claims, source, ws, { wait = RELEASE_WAIT_MS, timeout = RELEASE_TIMEOUT_MS } = {}) {
+export function claimScreen(claims, source, ws, { wait = RELEASE_WAIT_MS, timeout = RELEASE_TIMEOUT_MS, readOnly = false } = {}) {
   const previous = claims.get(source);
+  if (readOnly && previous && previous.ws !== ws && previous.ws.readyState === previous.ws.OPEN) {
+    return Promise.reject(new Error('This screen is already being viewed. Try again after the other viewer disconnects.'));
+  }
   let release;
   const released = new Promise((resolve) => { release = resolve; });
   claims.set(source, { ws, released });

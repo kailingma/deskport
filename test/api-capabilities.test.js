@@ -15,7 +15,7 @@ test('API: screen metadata is current, arrays default empty, and local choices s
   const api = createApi({
     hosts: { self }, machines,
     registry: { list: () => [remote], summary: () => ({}) },
-    access: { canUse: () => true },
+    access: { canUse: () => true, canEdit: () => true },
   });
   app.use((req, res, next) => { req.user = { email: 'test@example.com' }; next(); });
   app.use('/h/:id', (req, res, next) => { req.machine = machines.get(req.params.id); next(); }, api);

@@ -17,6 +17,7 @@ import { createRegistry, JoinError } from './registry.js';
 import { createMachines } from './machines.js';
 import { createPrefs } from './prefs.js';
 import { createAccess } from './access.js';
+import { createStreamAccess } from './stream-access.js';
 import { createReleases } from './releases.js';
 import { generateAgentKey, KINDS } from './protocol.js';
 
@@ -56,7 +57,7 @@ const local = config.relay ? null : createLocalHost({ config, root, log });
 if (!config.relay) log('DESKPORT_RELAY=0: host work runs in this process');
 
 const releases = createReleases({ root, keyFile: config.releaseKeyFile, log });
-const registry = createRegistry({ file: config.agentsFile, agents, reservedIds: [selfId], releaseKey: releases.publicKey, log });
+const registry = createRegistry({ file: config.agentsFile, agents, access, reservedIds: [selfId], releaseKey: releases.publicKey, log });
 // Joined machines get newer agent builds offered; this machine's shim is not an agent build.
 agents.onHello = (id, hello) => (id === selfId ? null : releases.offerFor(hello));
 const machines = createMachines({ hosts, agents, registry, local });
@@ -183,6 +184,8 @@ function reject(socket, status, text) {
   socket.destroy();
 }
 
+const streamAccess = createStreamAccess({ access, log });
+
 server.on('upgrade', async (req, socket, head) => {
   const { pathname } = new URL(req.url, 'http://localhost');
   // Agents sign their own upgrades (docs/protocol.md); no person check there.
@@ -208,22 +211,8 @@ server.on('upgrade', async (req, socket, head) => {
   }
   endpoint.handleUpgrade(req, socket, head, (ws) => {
     log(`${pathname} opened by ${req.user.email}`);
-    const open = { ws, email: req.user.email, machineId: machine.id };
-    openStreams.add(open);
-    ws.on('close', () => openStreams.delete(open));
-    machine.stream(kind, ws, req);
+    machine.stream(kind, ws, req, streamAccess.track(ws, req.user.email, machine.id));
   });
-});
-
-// A stream ends as soon as its person loses the machine on the admin page.
-const openStreams = new Set();
-access.onChange(() => {
-  for (const s of openStreams) {
-    if (access.canUse(s.email, s.machineId)) continue;
-    log(`closing a stream of ${s.email} on ${s.machineId}: access removed`);
-    s.ws.close(4003, 'access removed');
-    openStreams.delete(s);
-  }
 });
 
 // The agent shim for this machine, restarted if it exits.

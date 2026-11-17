@@ -8,7 +8,7 @@ This page describes Linux. The Windows build (install with PowerShell, a schedul
 
 ## Install and join
 
-On the hub: build the agent (`npm run build:agent`, needs Rust) and mint a join token (see [setup.md](setup.md), step 9). On the machine:
+On the hub: build the agent (`npm run build:agent`, needs Rust) and mint a join token (see [setup.md](setup.md), step 9). Admins can also allow other people to add machines in Machines, People. A non-admin gets Edit on each machine joined with their token; the permission is rechecked when joining. On the machine:
 
 ```bash
 curl -fsSL https://<hub>/agent/v1/install.sh | sh -s -- <join token> [--name "<name>"] [--rejoin] [--no-tmux] [--no-screen]
@@ -51,15 +51,16 @@ curl -fsSL https://<hub>/agent/v1/uninstall.sh | sh
 | `DESKPORT_TERM_WINDOW` | Flow control window in characters (default 131072). |
 | `~/.config/deskport-agent/portal-screen.py` | The screen helper, written from the binary when it differs. |
 | `~/.config/deskport-agent/screen-restore-token` | The portal's restore token (mode 600). Delete it to be asked again at the machine. |
+| `~/.config/deskport-agent/screen-restore-token.readonly` | Separate ScreenCast-only consent for Read access; does not overwrite the control grant. |
 
 ## Screen
 
 On a Wayland desktop with an xdg-desktop-portal RemoteDesktop backend (KDE Plasma with xdg-desktop-portal-kde, GNOME with xdg-desktop-portal-gnome, others), the agent shares the screen through the portal. `scripts/portal-screen.py`, carried in the binary, does the portal calls, PipeWire capture, encoding (JPEG for Images, x264enc or openh264enc with h264parse for H.264, av1enc with av1parse for AV1), input and clipboard with the system's python3 and GStreamer; `agent/src/screen/bridge.rs` turns that into the Guacamole subset the page already speaks (protocol.md, Streams).
 
 - **Asking.** The first connection makes the portal ask at the machine which monitor to share and whether to allow control. The page shows "Waiting for someone at <machine> to allow screen sharing." meanwhile (up to 3 minutes). The answer is kept as a restore token, so later connections start without asking until it is revoked or the file is deleted.
-- **Permissions.** Keyboard, pointer and clipboard are used only as far as the portal granted them, in the helper, the bridge and the page. A share without control is view only; a share whose clipboard was not explicitly allowed says "Clipboard unavailable". The page disables the matching buttons.
+- **Permissions.** Keyboard, pointer and clipboard are used only as far as the portal granted them, in the helper, the bridge and the page. A share without control is view only; a share whose clipboard was not explicitly allowed says "Clipboard unavailable". The page disables the matching buttons. Machine Read access starts a ScreenCast-only portal session, without requesting devices or clipboard; Edit never overrides the portal's own restrictions.
 - **Video.** Images always work; H.264 and AV1 are offered only when the encoder and its parser are installed. If the encoder fails, the bridge reports it on the video stream and the page reconnects with images until the picture settings change.
-- **One viewer.** Opening the screen in another window ends the earlier one with a message.
+- **One viewer.** Opening the screen with Edit in another window ends the earlier one with a message. A Read viewer cannot replace an existing viewer and is asked to try again after it disconnects.
 - **What is missing.** The agent checks at start, then every 30 s while the screen is unavailable and every 5 minutes otherwise. The hub shows the reason and the install command on the machine's no-screen page.
 
 Only My monitor is offered; extra monitors, separate desktops and Match this device stay with the hub machine.
@@ -67,6 +68,8 @@ Only My monitor is offered; extra monitors, separate desktops and Match this dev
 ## Terminal
 
 The same messages as `shim/terminal.js` (architecture.md, Terminal): output batched for 4 ms after the first chunk, flow control with `?flow=1` (stops reading the pseudo-terminal above 128 K unacknowledged characters, counted as UTF-16 like the page does), pongs as binary JSON, a WebSocket ping every 25 s. Variables starting with `RDP_`, `CF_ACCESS_`, `DESKPORT_` or `GUACD_` (in any case) are not passed to tmux. There is no xdg-open forwarding yet (`files: false`).
+
+With machine Read access, input and resize are dropped. Linux attaches to an existing tmux session with `read-only,ignore-size` and `-E` (no environment updates), without creating one. Windows subscribes to an existing shell without starting or resizing it. A person with Edit must open the terminal first if none is running. Version 0.4.0 adds the `readOnly` capability; older agents must update before the hub opens Read-only streams on them.
 
 ## Metrics
 

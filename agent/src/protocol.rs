@@ -57,6 +57,19 @@ pub fn now_ms() -> u128 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
 }
 
+/// An explicit Read-only grant cannot be weakened by a conflicting browser query.
+pub fn stream_query(query: &str, read_only: bool) -> String {
+    if !read_only {
+        return query.to_string();
+    }
+    let query = query.trim_start_matches('?');
+    format!("?{query}{}readonly=1", if query.is_empty() { "" } else { "&" })
+}
+
+pub fn read_only(query: &str) -> bool {
+    query.trim_start_matches('?').split('&').any(|kv| kv == "readonly=1")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +92,14 @@ mod tests {
     fn ws_urls() {
         assert_eq!(ws_url("https://hub.test/", "/agent/v1/control"), "wss://hub.test/agent/v1/control");
         assert_eq!(ws_url("http://127.0.0.1:7900", "/x"), "ws://127.0.0.1:7900/x");
+    }
+
+    #[test]
+    fn stream_read_only_overrides_the_query() {
+        assert_eq!(stream_query("?flow=1", false), "?flow=1");
+        assert_eq!(stream_query("", true), "?readonly=1");
+        assert!(read_only(&stream_query("?readonly=0&flow=1", true)));
+        assert!(read_only("?readonly=1&readonly=0"));
+        assert!(!read_only("?otherreadonly=1&readonly=0"));
     }
 }

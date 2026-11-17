@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import pty from 'node-pty';
+import { createReadOnlyFilter } from './readonly.js';
 
 const SECRET_PREFIXES = ['RDP_', 'CF_ACCESS_', 'DESKPORT_', 'GUACD_'];
 
@@ -29,8 +30,9 @@ export function sessionVars(binDir, basePath) {
  * the session's variables. tmux gives the first pane of a new session the
  * client's own PATH, so the client is started with the same variables.
  */
-export function tmuxArgs(session, cwd, vars) {
+export function tmuxArgs(session, cwd, vars, { readOnly = false } = {}) {
   const target = `=${session}`;
+  if (readOnly) return ['attach-session', '-E', '-t', target, '-f', 'read-only,ignore-size'];
   return [
     'new-session', '-A', '-s', session, '-c', cwd,
     ...Object.entries(vars).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
@@ -69,10 +71,13 @@ function shellEnv() {
  *   JSON: {type:"open", url, label, file?} when a program in the terminal runs
  *   xdg-open (shim/opener.js), and with ?flow=1 {type:"pong", id}.
  */
-export function handleTerminal(ws, req, { tmuxSession, cwd, binDir, opener }, log) {
-  const flow = new URL(req.url, 'http://localhost').searchParams.get('flow') === '1';
-  const vars = sessionVars(binDir, tmuxPath());
-  const term = pty.spawn('tmux', tmuxArgs(tmuxSession, cwd, vars), {
+export function handleTerminal(ws, req, { tmuxSession, cwd, binDir, opener, readOnly = false }, log) {
+  const query = new URL(req.url, 'http://localhost').searchParams;
+  const flow = query.get('flow') === '1';
+  readOnly ||= query.get('readonly') === '1';
+  const filterInput = readOnly ? createReadOnlyFilter('term') : (data) => data;
+  const vars = readOnly ? {} : sessionVars(binDir, tmuxPath());
+  const term = pty.spawn('tmux', tmuxArgs(tmuxSession, cwd, vars, { readOnly }), {
     name: 'xterm-256color',
     cols: 100,
     rows: 30,
@@ -121,16 +126,19 @@ export function handleTerminal(ws, req, { tmuxSession, cwd, binDir, opener }, lo
   // Keeps idle connections open through proxies that close quiet ones.
   const ping = setInterval(() => { if (ws.readyState === ws.OPEN) ws.ping(); }, PING_MS);
 
-  ws.on('message', (raw) => {
+  ws.on('message', (raw, isBinary) => {
+    const filtered = filterInput(raw, isBinary);
+    if (filtered === null) return;
     let msg;
     try {
-      msg = JSON.parse(raw.toString());
+      msg = JSON.parse(filtered.toString());
     } catch {
       return;
     }
-    if (msg.type === 'input' && typeof msg.data === 'string') {
+    if (!msg || typeof msg !== 'object') return;
+    if (!readOnly && msg.type === 'input' && typeof msg.data === 'string') {
       term.write(msg.data);
-    } else if (msg.type === 'resize') {
+    } else if (!readOnly && msg.type === 'resize') {
       const cols = Math.max(2, Math.min(500, msg.cols | 0));
       const rows = Math.max(2, Math.min(300, msg.rows | 0));
       term.resize(cols, rows);
