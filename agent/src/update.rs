@@ -6,7 +6,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::io::Read;
-use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::time::Duration;
 
 /// Exit status after replacing the binary; the service manager starts the new one.
@@ -84,14 +84,56 @@ pub fn apply(cfg: &Config, seed: &[u8; 32], offer: &Value) -> Result<String, Str
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let tmp = exe.with_extension("new");
     std::fs::write(&tmp, &body).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &exe).map_err(|e| format!("{}: {e}", exe.display()))?;
+    replace(&tmp, &exe)?;
     Ok(version.to_string())
 }
 
+#[cfg(not(windows))]
+fn replace(new: &Path, exe: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(new, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    std::fs::rename(new, exe).map_err(|e| format!("{}: {e}", exe.display()))
+}
+
+/// Windows does not let a running program's file be replaced or deleted,
+/// but it may be renamed: the running one becomes `<name>.<time>.old`, which
+/// `remove_old_builds` deletes once nothing runs from it.
+#[cfg(windows)]
+fn replace(new: &Path, exe: &Path) -> Result<(), String> {
+    let old = old_name(exe, protocol::now_ms() as u64);
+    std::fs::rename(exe, &old).map_err(|e| format!("{}: {e}", exe.display()))?;
+    if let Err(e) = std::fs::rename(new, exe) {
+        let _ = std::fs::rename(&old, exe);
+        return Err(format!("{}: {e}", exe.display()));
+    }
+    Ok(())
+}
+
+/// `C:\...\deskport-agent.exe` -> `C:\...\deskport-agent.<stamp>.old`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn old_name(exe: &Path, stamp: u64) -> std::path::PathBuf {
+    let stem = exe.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "deskport-agent".into());
+    exe.with_file_name(format!("{stem}.{stamp}.old"))
+}
+
+/// Deletes the builds `replace` renamed; those still running stay.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn remove_old_builds(exe: &Path) {
+    let (Some(dir), Some(stem)) = (exe.parent(), exe.file_stem()) else { return };
+    let prefix = format!("{}.", stem.to_string_lossy());
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with(&prefix) && name.ends_with(".old") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 /// Stops and removes the systemd user unit, the binary and the settings.
+#[cfg(not(windows))]
 pub fn uninstall() -> Result<(), String> {
-    let unit_dir = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| config::home().join(".config")).join("systemd/user");
+    let unit_dir = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| crate::sys::home().join(".config")).join("systemd/user");
     let unit = unit_dir.join("deskport-agent.service");
     if unit.exists() {
         let _ = std::process::Command::new("systemctl").args(["--user", "disable", "--now", "deskport-agent.service"]).status();
@@ -112,6 +154,63 @@ pub fn uninstall() -> Result<(), String> {
     Ok(())
 }
 
+/// Removes the scheduled task (or Startup shortcut), the settings, the log
+/// and the binary, then ends the running agent.
+#[cfg(windows)]
+pub fn uninstall() -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    let quiet = |cmd: &mut Command| cmd.stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+    if quiet(Command::new("schtasks.exe").args(["/Delete", "/TN", crate::runner::TASK, "/F"])) {
+        println!("removed the scheduled task {}", crate::runner::TASK);
+    }
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        let lnk = std::path::PathBuf::from(appdata).join("Microsoft\\Windows\\Start Menu\\Programs\\Startup").join(format!("{}.lnk", crate::runner::TASK));
+        if lnk.exists() {
+            std::fs::remove_file(&lnk).map_err(|e| format!("{}: {e}", lnk.display()))?;
+            println!("removed {}", lnk.display());
+        }
+    }
+    let dir = config::dir();
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        println!("removed {}", dir.display());
+    }
+    // The running agent may hold its log open; tried again after it has ended.
+    let logs = crate::runner::log_dir();
+    let logs_left = logs.exists() && std::fs::remove_dir_all(&logs).is_err();
+    if logs.exists() && !logs_left {
+        println!("removed {}", logs.display());
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        // A running program cannot be deleted, but it can be moved out of the
+        // way: to the temporary folder, else next to itself.
+        let stamp = protocol::now_ms() as u64;
+        let temp = std::env::temp_dir().join(format!("deskport-agent-{stamp}.old"));
+        let gone = if std::fs::rename(&exe, &temp).is_ok() { temp } else {
+            let old = old_name(&exe, stamp);
+            std::fs::rename(&exe, &old).map_err(|e| format!("{}: {e}", exe.display()))?;
+            old
+        };
+        remove_old_builds(&exe);
+        if let Some(dir) = exe.parent().filter(|d| d.file_name().is_some_and(|n| n == "deskport-agent")) {
+            let _ = std::fs::remove_dir(dir);
+        }
+        println!("removed {} (what is left is {}, deleted with the temporary files or by hand)", exe.display(), gone.display());
+    }
+    println!("To remove this machine from the hub too, use Remove on its dashboard.");
+    // Last, since a terminal opened through the agent ends with it.
+    let me = std::process::id().to_string();
+    quiet(Command::new("taskkill.exe").args(["/F", "/IM", "deskport-agent.exe", "/FI", &format!("PID ne {me}")]));
+    if logs_left {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        match std::fs::remove_dir_all(&logs) {
+            Ok(()) => println!("removed {}", logs.display()),
+            Err(e) => println!("could not remove {}: {e}", logs.display()),
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +222,21 @@ mod tests {
         assert!(newer("0.10.0", "0.9.0"));
         assert!(!newer("0.1.0", "0.1.0"));
         assert!(!newer("0.1", "0.1.0"));
+    }
+
+    #[test]
+    fn old_builds_are_renamed_then_removed() {
+        let dir = std::env::temp_dir().join(format!("deskport-old-{}", protocol::now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("deskport-agent.exe");
+        let old = old_name(&exe, 42);
+        assert_eq!(old.file_name().unwrap(), "deskport-agent.42.old");
+        for f in [&exe, &old, &dir.join("deskport-agent.json")] {
+            std::fs::write(f, b"x").unwrap();
+        }
+        remove_old_builds(&exe);
+        assert!(exe.exists() && !old.exists() && dir.join("deskport-agent.json").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
